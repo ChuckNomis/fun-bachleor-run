@@ -9,12 +9,13 @@ add_executable(funrun
     src/Systems.cpp
     lib/bagel26/bagel.h)
 
-target_include_directories(funrun PRIVATE src lib/bagel26)
+target_include_directories(funrun PRIVATE src lib/bagel26 lib/SDL_image/include)
 
 set(SDL_STATIC ON)
 add_subdirectory(lib/SDL)
 target_link_libraries(funrun PUBLIC SDL3-static)
 
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(lib/SDL_image)
 target_link_libraries(funrun PUBLIC SDL3_image-static)
 

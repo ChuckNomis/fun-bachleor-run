@@ -4,28 +4,38 @@
 
 using bagel::Entity;
 
+// Spritesheet: 1774×887 px, 4 cols × 2 rows → each frame 443.5×443.5
+static constexpr float SPRITE_FRAME_W = 1774.f / 4.f;
+static constexpr float SPRITE_FRAME_H =  887.f / 2.f;
+// On-screen rendered size of the player character
+static constexpr float PLAYER_DRAW_W  = 56.f;
+static constexpr float PLAYER_DRAW_H  = 56.f;
+
 bagel::Entity createPlayer(b2WorldId world, SDL_Texture* tex,
                            SDL_FPoint startPosPx, int /*playerIndex*/)
 {
-    b2BodyDef bodyDef = b2DefaultBodyDef();
-    bodyDef.type      = b2_dynamicBody;
-    bodyDef.position  = { startPosPx.x / BOX_SCALE, startPosPx.y / BOX_SCALE };
-    b2BodyId body     = b2CreateBody(world, &bodyDef);
+    b2BodyDef bodyDef       = b2DefaultBodyDef();
+    bodyDef.type            = b2_dynamicBody;
+    bodyDef.position        = { startPosPx.x / BOX_SCALE, startPosPx.y / BOX_SCALE };
+    bodyDef.motionLocks.angularZ = true;  // prevent tumbling
+    b2BodyId body           = b2CreateBody(world, &bodyDef);
 
     b2ShapeDef shapeDef = b2DefaultShapeDef();
     shapeDef.density    = 1.0f;
-    shapeDef.friction   = 0.3f;
+    shapeDef.material.friction = 0.3f;
     b2Polygon box       = b2MakeBox(16.f / BOX_SCALE, 24.f / BOX_SCALE);
     b2ShapeId shape     = b2CreatePolygonShape(body, &shapeDef, &box);
 
     Entity e = Entity::create();
     e.addAll(
         TransformComponent  { startPosPx, 0.f },
-        DrawableComponent   { tex, {0, 0, 32, 48}, {0, 0, 32, 48}, 0 },
-        PhysicsBodyComponent{ body, shape, false },
+        DrawableComponent   { tex, {0, 0, SPRITE_FRAME_W, SPRITE_FRAME_H},
+                              {0, 0, PLAYER_DRAW_W, PLAYER_DRAW_H}, 0 },
+        PhysicsBodyComponent{ body, shape, false, 0 },
         PlayerInputComponent{ false, false, false, false, false },
         PlayerStateComponent{ 3, 1.0f, -1, false },
-        GravityShiftComponent{ false, 0.f, 3000.f }
+        GravityShiftComponent{ false, 0.f, 3000.f },
+        AnimationComponent  { 0, 0.f, 80.f }
     );
     return e;
 }
@@ -46,7 +56,7 @@ bagel::Entity createPlatform(b2WorldId world, SDL_Texture* tex,
     e.addAll(
         TransformComponent  { posPx, 0.f },
         DrawableComponent   { tex, {0, 0, widthPx, heightPx}, {0, 0, widthPx, heightPx}, 0 },
-        PhysicsBodyComponent{ body, shape, false }
+        PhysicsBodyComponent{ body, shape, false, 0 }
     );
     return e;
 }
@@ -83,8 +93,19 @@ bagel::Entity createProjectile(b2WorldId world, SDL_Texture* tex, SDL_FPoint pos
     e.addAll(
         TransformComponent  { posPx, 0.f },
         DrawableComponent   { tex, {0, 0, 16, 16}, {0, 0, 16, 16}, 0 },
-        PhysicsBodyComponent{ body, shape, false },
+        PhysicsBodyComponent{ body, shape, false, 0 },
         TrapComponent       { 0.5f, 1.5f, ownerEntityId }
+    );
+    return e;
+}
+
+bagel::Entity createDecoration(SDL_Texture* tex,
+                               SDL_FPoint posPx, float widthPx, float heightPx)
+{
+    Entity e = Entity::create();
+    e.addAll(
+        TransformComponent { posPx, 0.f },
+        DrawableComponent  { tex, {0, 0, widthPx, heightPx}, {0, 0, widthPx, heightPx}, 0 }
     );
     return e;
 }

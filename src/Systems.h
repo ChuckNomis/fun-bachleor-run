@@ -12,6 +12,10 @@ struct SystemContext {
     SDL_Texture*  spritesheet;
     bagel::Entity camera;
     float         frameDtSec;
+    SDL_Texture*  mapTexture;
+    float         mapWidthPx;
+    float         mapHeightPx;
+    float         zoom;         // render scale (1.0 = no zoom, 1.5 = zoomed in)
 };
 
 // Systems run once per frame, in this order (see Game::run):

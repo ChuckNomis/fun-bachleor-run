@@ -8,13 +8,21 @@ using bagel::MaskBuilder;
 using bagel::World;
 
 namespace {
-    constexpr float RAD_TO_DEG = 180.f / 3.14159265358979323846f;
+    constexpr float RAD_TO_DEG    = 180.f / 3.14159265358979323846f;
+    constexpr float RUN_SPEED_MPS = 2.5f;
+    constexpr float JUMP_VY       = 8.5f;
+    constexpr int   JUMP_LOCK_FRAMES = 18; // ~0.3 s cooldown prevents apex re-jump
+
+    // Spritesheet: 1774×887 px, 4 cols × 2 rows
+    constexpr float SPRITE_FRAME_W = 1774.f / 4.f;
+    constexpr float SPRITE_FRAME_H =  887.f / 2.f;
+    constexpr int   SPRITE_COLS    = 4;
+    constexpr int   TOTAL_FRAMES   = 8;
+
+    // Physics body half-height (px) — used to bottom-align the sprite to the physics box.
+    constexpr float PLAYER_BODY_HH = 24.f;
 }
 
-// ──────────────────────────────────────────────────────────────
-// InputSystem — maps SDL key events onto each player's
-// PlayerInputComponent. Edge-triggered fields are reset every
-// frame, then set by the matching key-down events.
 // ──────────────────────────────────────────────────────────────
 void input_system(const SDL_Event* events, int eventCount)
 {
@@ -23,22 +31,26 @@ void input_system(const SDL_Event* events, int eventCount)
 
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
         auto& in = e.get<PlayerInputComponent>();
+        in.move_right            = true;
+        in.move_left             = false;
         in.jump_pressed          = false;
         in.use_item_pressed      = false;
         in.gravity_shift_pressed = false;
-        // TODO: map SDL_Scancode -> player index, set the booleans above
-        //       and move_left/move_right based on key-down/key-up events.
     }
 
     for (int i = 0; i < eventCount; ++i) {
-        (void)events[i];
-        // TODO: dispatch each event to the right player's PlayerInputComponent
+        const SDL_Event& ev = events[i];
+        // key.repeat != 0 = OS key-repeat; ignore to avoid held-key jumps
+        if (ev.type == SDL_EVENT_KEY_DOWN &&
+            ev.key.scancode == SDL_SCANCODE_SPACE &&
+            ev.key.repeat == 0)
+        {
+            for (Entity e = World::first(q); !World::eof(q); e = World::next(q))
+                e.get<PlayerInputComponent>().jump_pressed = true;
+        }
     }
 }
 
-// ──────────────────────────────────────────────────────────────
-// PlayerControllerSystem — reads input/state, drives the Box2D
-// body (velocity/forces), and toggles personal gravity shift.
 // ──────────────────────────────────────────────────────────────
 void controller_system(const SystemContext& /*ctx*/)
 {
@@ -46,27 +58,29 @@ void controller_system(const SystemContext& /*ctx*/)
         .set<PlayerInputComponent>()
         .set<PlayerStateComponent>()
         .set<PhysicsBodyComponent>()
-        .set<GravityShiftComponent>()
         .build();
     static int q = World::createQuery(mask);
 
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
-        const auto& in    = e.get<PlayerInputComponent>();
-        const auto& state = e.get<PlayerStateComponent>();
-        const auto& phys  = e.get<PhysicsBodyComponent>();
-        auto& shift       = e.get<GravityShiftComponent>();
+        const auto& in = e.get<PlayerInputComponent>();
+        auto& phys     = e.get<PhysicsBodyComponent>();
 
-        (void)in; (void)state; (void)phys; (void)shift;
-        // TODO: apply move_left/move_right velocities, jump impulses
-        //       (scaled by current_speed_multiplier), and on
-        //       gravity_shift_pressed toggle shift.is_inverted and call
-        //       b2Body_SetGravityScale(phys.body_id, shift.is_inverted ? -1.f : 1.f)
+        b2Vec2 vel = b2Body_GetLinearVelocity(phys.body_id);
+        vel.x = in.move_right ? RUN_SPEED_MPS : 0.f;
+
+        // Jump only when truly grounded and not within the lock window.
+        // The lock prevents re-jumping at the apex (where vel.y ≈ 0 can
+        // briefly satisfy the grounded heuristic in physics_system).
+        if (in.jump_pressed && phys.is_grounded && phys.jump_lock_frames == 0) {
+            vel.y = -JUMP_VY;
+            phys.is_grounded     = false;
+            phys.jump_lock_frames = JUMP_LOCK_FRAMES;
+        }
+
+        b2Body_SetLinearVelocity(phys.body_id, vel);
     }
 }
 
-// ──────────────────────────────────────────────────────────────
-// PhysicsSystem — steps Box2D and writes resulting transforms
-// back into TransformComponent (meters -> pixels via BOX_SCALE).
 // ──────────────────────────────────────────────────────────────
 void physics_system(const SystemContext& ctx)
 {
@@ -79,20 +93,24 @@ void physics_system(const SystemContext& ctx)
     b2World_Step(ctx.physicsWorld, ctx.frameDtSec, 4);
 
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
-        const auto& phys = e.get<PhysicsBodyComponent>();
+        auto& phys = e.get<PhysicsBodyComponent>();
         const b2Transform t = b2Body_GetTransform(phys.body_id);
         e.get<TransformComponent>() = {
             { t.p.x * BOX_SCALE, t.p.y * BOX_SCALE },
             b2Rot_GetAngle(t.q) * RAD_TO_DEG
         };
-        // TODO: update is_grounded from contact events
+
+        const b2Vec2 vel = b2Body_GetLinearVelocity(phys.body_id);
+        // Grounded: very small downward velocity (settled on a surface).
+        // Upper bound kept tight so apex-of-jump (vel.y ≈ 0) is NOT grounded.
+        // jump_lock_frames acts as a second guard when this heuristic still fires.
+        phys.is_grounded = (vel.y >= -0.3f && vel.y <= 0.5f);
+
+        if (phys.jump_lock_frames > 0)
+            --phys.jump_lock_frames;
     }
 }
 
-// ──────────────────────────────────────────────────────────────
-// SensorCollisionSystem — reads Box2D sensor events, matches
-// them against SensorAreaComponent entities (item boxes, finish
-// lines), updates player inventory, and removes consumed boxes.
 // ──────────────────────────────────────────────────────────────
 void sensor_system(const SystemContext& ctx)
 {
@@ -100,27 +118,15 @@ void sensor_system(const SystemContext& ctx)
     static int q = World::createQuery(mask);
 
     const b2SensorEvents events = b2World_GetSensorEvents(ctx.physicsWorld);
-    for (int i = 0; i < events.beginCount; ++i) {
-        (void)events.beginEvents[i];
-        // TODO: resolve visitor/sensor shapes -> entities, walk the query
-        //       above to find the matching SensorAreaComponent, mark
-        //       is_triggered_this_frame, update PlayerStateComponent
-        //       (current_powerup_id), and queue the item box for destroy().
-    }
+    (void)events;
 
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
         auto& sensor = e.get<SensorAreaComponent>();
-        if (sensor.is_triggered_this_frame) {
+        if (sensor.is_triggered_this_frame)
             sensor.is_triggered_this_frame = false;
-            // TODO: e.destroy() once the item has been applied to the player
-            //       (do this after the query loop completes, never mid-iteration).
-        }
     }
 }
 
-// ──────────────────────────────────────────────────────────────
-// DamageSystem — processes trap/hazard overlaps with players,
-// applies penalties/stun, and tracks elimination.
 // ──────────────────────────────────────────────────────────────
 void damage_system(const SystemContext& /*ctx*/)
 {
@@ -129,20 +135,9 @@ void damage_system(const SystemContext& /*ctx*/)
         .set<PhysicsBodyComponent>()
         .build();
     static int q = World::createQuery(mask);
-
-    for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
-        const auto& trap = e.get<TrapComponent>();
-        (void)trap;
-        // TODO: check Box2D contact events for player overlap; on hit,
-        //       apply speed_penalty_factor / stun_duration_seconds to the
-        //       player's PlayerStateComponent and decrement lives,
-        //       setting is_eliminated when lives reaches zero.
-    }
+    (void)q;
 }
 
-// ──────────────────────────────────────────────────────────────
-// CameraSystem — tracks the lead (furthest-forward, non-eliminated)
-// racer and anchors the camera entity's TransformComponent to it.
 // ──────────────────────────────────────────────────────────────
 void camera_system(const SystemContext& ctx)
 {
@@ -152,28 +147,25 @@ void camera_system(const SystemContext& ctx)
         .build();
     static int q = World::createQuery(mask);
 
-    float maxX = 0.f;
-    bool found = false;
-    for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
-        const auto& state = e.get<PlayerStateComponent>();
-        if (state.is_eliminated) continue;
+    float leadX = 0.f;
+    bool  found = false;
 
+    for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
+        if (e.get<PlayerStateComponent>().is_eliminated) continue;
         const float px = e.get<TransformComponent>().position.x;
-        if (!found || px > maxX) {
-            maxX  = px;
-            found = true;
-        }
+        if (!found || px > leadX) { leadX = px; found = true; }
     }
 
     if (found && ctx.camera.has<TransformComponent>()) {
-        // TODO: replace the snap-to with a lerp toward maxX for smooth tracking
-        ctx.camera.get<TransformComponent>().position.x = maxX;
+        // Visible world width shrinks with zoom: SCREEN_W / zoom
+        const float visibleW = static_cast<float>(SCREEN_W) / ctx.zoom;
+        float camX = leadX - visibleW / 2.f;
+        if (camX < 0.f)                      camX = 0.f;
+        if (camX > ctx.mapWidthPx - visibleW) camX = ctx.mapWidthPx - visibleW;
+        ctx.camera.get<TransformComponent>().position.x = camX;
     }
 }
 
-// ──────────────────────────────────────────────────────────────
-// RenderSystem — clears the renderer, offsets sprites by the
-// camera position, and draws every Transform+Drawable entity.
 // ──────────────────────────────────────────────────────────────
 void render_system(const SystemContext& ctx)
 {
@@ -183,24 +175,63 @@ void render_system(const SystemContext& ctx)
         .build();
     static int q = World::createQuery(mask);
 
+    SDL_SetRenderDrawColor(ctx.renderer, 100, 180, 240, 255);
     SDL_RenderClear(ctx.renderer);
 
-    SDL_FPoint camPos{0, 0};
+    SDL_FPoint camPos{0.f, 0.f};
     if (ctx.camera.has<TransformComponent>())
         camPos = ctx.camera.get<TransformComponent>().position;
 
+    const float z = ctx.zoom;
+
+    if (ctx.mapTexture) {
+        SDL_FRect mapDest = { -camPos.x * z, 0.f,
+                              ctx.mapWidthPx * z, ctx.mapHeightPx * z };
+        SDL_RenderTexture(ctx.renderer, ctx.mapTexture, nullptr, &mapDest);
+    }
+
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
         const auto& tr = e.get<TransformComponent>();
-        const auto& dr = e.get<DrawableComponent>();
+        auto&       dr = e.get<DrawableComponent>();
 
-        SDL_FRect dest = dr.dest_dimensions;
-        dest.x = tr.position.x - camPos.x;
-        dest.y = tr.position.y - camPos.y;
+        // Compute source rect (animated entities use the per-frame rect)
+        SDL_FRect src = dr.src_rect;
+        if (e.has<AnimationComponent>()) {
+            auto& anim = e.get<AnimationComponent>();
+            anim.timer_ms += ctx.frameDtSec * 1000.f;
+            if (anim.timer_ms >= anim.frame_duration_ms) {
+                anim.timer_ms -= anim.frame_duration_ms;
+                anim.frame_index = (anim.frame_index + 1) % TOTAL_FRAMES;
+            }
+            const int col = anim.frame_index % SPRITE_COLS;
+            const int row = anim.frame_index / SPRITE_COLS;
+            src = { col * SPRITE_FRAME_W, row * SPRITE_FRAME_H,
+                    SPRITE_FRAME_W, SPRITE_FRAME_H };
+        }
 
-        SDL_RenderTextureRotated(
-            ctx.renderer, dr.texture, &dr.src_rect, &dest,
-            tr.rotation_degrees, nullptr,
-            static_cast<SDL_FlipMode>(dr.flip_flags));
+        // World-space top-left of the draw rect
+        const float baseW = dr.dest_dimensions.w;
+        const float baseH = dr.dest_dimensions.h;
+
+        const float worldLeft = tr.position.x - baseW / 2.f;
+        const float worldTop  = e.has<AnimationComponent>()
+            ? (tr.position.y + PLAYER_BODY_HH - baseH) // bottom-align to physics body
+            : (tr.position.y - baseH / 2.f);            // center-align
+
+        SDL_FRect dest {
+            (worldLeft - camPos.x) * z,
+            (worldTop  - camPos.y) * z,
+            baseW * z,
+            baseH * z
+        };
+
+        if (dr.texture) {
+            SDL_FRect* srcPtr = e.has<AnimationComponent>() ? &src : nullptr;
+            SDL_RenderTextureRotated(
+                ctx.renderer, dr.texture, srcPtr, &dest,
+                tr.rotation_degrees, nullptr,
+                static_cast<SDL_FlipMode>(dr.flip_flags));
+        }
     }
 
     SDL_RenderPresent(ctx.renderer);

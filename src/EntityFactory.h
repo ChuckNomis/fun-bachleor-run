@@ -36,4 +36,10 @@ bagel::Entity createProjectile(
     SDL_FPoint   velocityPxPerSec,
     uint64_t     ownerEntityId);
 
+bagel::Entity createDecoration(
+    SDL_Texture* tex,
+    SDL_FPoint   posPx,
+    float        widthPx,
+    float        heightPx);
+
 bagel::Entity createCamera(SDL_FPoint startPosPx);

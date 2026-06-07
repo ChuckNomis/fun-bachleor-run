@@ -7,28 +7,32 @@
 
 // ─────────────────────────────────────────────
 // Component structs (pure data, no logic)
-// Field lists per the Fun Run ECS Architecture & Implementation Plan
+// IMPORTANT: must be named structs, not anonymous-struct type aliases.
+// Anonymous structs (using Foo = struct {...}) have no linkage, so each
+// translation unit gets a distinct type — Component<T>::Index would differ
+// per TU, causing mask mismatches between addComponent and has<>/query.
 // ─────────────────────────────────────────────
 
-using TransformComponent = struct {
+struct TransformComponent {
     SDL_FPoint position;
     float      rotation_degrees;
 };
 
-using DrawableComponent = struct {
+struct DrawableComponent {
     SDL_Texture* texture;
     SDL_FRect    src_rect;
     SDL_FRect    dest_dimensions;
     int          flip_flags;
 };
 
-using PhysicsBodyComponent = struct {
+struct PhysicsBodyComponent {
     b2BodyId  body_id;
     b2ShapeId shape_id;
     bool      is_grounded;
+    int       jump_lock_frames; // frames remaining before next jump is allowed
 };
 
-using PlayerInputComponent = struct {
+struct PlayerInputComponent {
     bool move_right;
     bool move_left;
     bool jump_pressed;
@@ -36,28 +40,34 @@ using PlayerInputComponent = struct {
     bool gravity_shift_pressed;
 };
 
-using PlayerStateComponent = struct {
+struct PlayerStateComponent {
     int   lives;
     float current_speed_multiplier;
     int   current_powerup_id;
     bool  is_eliminated;
 };
 
-using GravityShiftComponent = struct {
+struct GravityShiftComponent {
     bool  is_inverted;
     float cooldown_timer_ms;
     float maximum_shift_duration_ms;
 };
 
-using SensorAreaComponent = struct {
+struct SensorAreaComponent {
     int  sensor_type_id;
     bool is_triggered_this_frame;
 };
 
-using TrapComponent = struct {
+struct TrapComponent {
     float    speed_penalty_factor;
     float    stun_duration_seconds;
     uint64_t owner_entity_id;
+};
+
+struct AnimationComponent {
+    int   frame_index;        // 0-7 (4 cols x 2 rows in spritesheet)
+    float timer_ms;
+    float frame_duration_ms;
 };
 
 // ─────────────────────────────────────────────
@@ -76,4 +86,7 @@ template <> struct bagel::Storage<GravityShiftComponent> final : bagel::NoInstan
 };
 template <> struct bagel::Storage<PhysicsBodyComponent> final : bagel::NoInstance {
     using type = bagel::PackedStorage<PhysicsBodyComponent>;
+};
+template <> struct bagel::Storage<AnimationComponent> final : bagel::NoInstance {
+    using type = bagel::PackedStorage<AnimationComponent>;
 };
