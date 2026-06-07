@@ -29,7 +29,8 @@ struct PhysicsBodyComponent {
     b2BodyId  body_id;
     b2ShapeId shape_id;
     bool      is_grounded;
-    int       jump_lock_frames; // frames remaining before next jump is allowed
+    int       jump_lock_frames;  // frames remaining before next jump is allowed
+    int       coyote_frames;     // grace period after leaving ground
 };
 
 struct PlayerInputComponent {
@@ -38,6 +39,7 @@ struct PlayerInputComponent {
     bool jump_pressed;
     bool use_item_pressed;
     bool gravity_shift_pressed;
+    int  jump_buffer_frames; // remember jump input for a few frames
 };
 
 struct PlayerStateComponent {
@@ -45,7 +47,20 @@ struct PlayerStateComponent {
     float current_speed_multiplier;
     int   current_powerup_id;
     bool  is_eliminated;
+    bool  has_finished; // crossed the finish-line sensor
+    int   score;
 };
+
+struct CoinComponent {
+    int value;
+};
+
+// Sensor type ids for SensorAreaComponent::sensor_type_id
+namespace SensorType {
+    inline constexpr int FinishLine = 1;
+    inline constexpr int ItemBox    = 2;
+    inline constexpr int Coin         = 3;
+}
 
 struct GravityShiftComponent {
     bool  is_inverted;
@@ -54,8 +69,9 @@ struct GravityShiftComponent {
 };
 
 struct SensorAreaComponent {
-    int  sensor_type_id;
-    bool is_triggered_this_frame;
+    b2ShapeId shape_id;
+    int       sensor_type_id;
+    bool      is_triggered_this_frame;
 };
 
 struct TrapComponent {

@@ -1,15 +1,13 @@
 #include "EntityFactory.h"
 #include "Components.h"
 #include "Game.h"
+#include "SpriteConfig.h"
 
 using bagel::Entity;
 
-// Spritesheet: 1774×887 px, 4 cols × 2 rows → each frame 443.5×443.5
-static constexpr float SPRITE_FRAME_W = 1774.f / 4.f;
-static constexpr float SPRITE_FRAME_H =  887.f / 2.f;
 // On-screen rendered size of the player character
-static constexpr float PLAYER_DRAW_W  = 56.f;
-static constexpr float PLAYER_DRAW_H  = 56.f;
+static constexpr float PLAYER_DRAW_W  = 64.f;
+static constexpr float PLAYER_DRAW_H  = 64.f;
 
 bagel::Entity createPlayer(b2WorldId world, SDL_Texture* tex,
                            SDL_FPoint startPosPx, int /*playerIndex*/)
@@ -22,18 +20,26 @@ bagel::Entity createPlayer(b2WorldId world, SDL_Texture* tex,
 
     b2ShapeDef shapeDef = b2DefaultShapeDef();
     shapeDef.density    = 1.0f;
-    shapeDef.material.friction = 0.3f;
-    b2Polygon box       = b2MakeBox(16.f / BOX_SCALE, 24.f / BOX_SCALE);
-    b2ShapeId shape     = b2CreatePolygonShape(body, &shapeDef, &box);
+    shapeDef.material.friction = 0.f; // slide off platform edges instead of snagging
+    shapeDef.enableSensorEvents = true;
+    // Capsule slides past platform corners better than a box.
+    b2Capsule capsule = {
+        { 0.f, -14.f / BOX_SCALE },
+        { 0.f,  14.f / BOX_SCALE },
+        10.f / BOX_SCALE
+    };
+    b2ShapeId shape = b2CreateCapsuleShape(body, &shapeDef, &capsule);
 
     Entity e = Entity::create();
     e.addAll(
         TransformComponent  { startPosPx, 0.f },
-        DrawableComponent   { tex, {0, 0, SPRITE_FRAME_W, SPRITE_FRAME_H},
-                              {0, 0, PLAYER_DRAW_W, PLAYER_DRAW_H}, 0 },
-        PhysicsBodyComponent{ body, shape, false, 0 },
-        PlayerInputComponent{ false, false, false, false, false },
-        PlayerStateComponent{ 3, 1.0f, -1, false },
+        DrawableComponent   { tex,
+                              { SPRITE_CROP_X, SPRITE_CROP_Y, SPRITE_CROP_W, SPRITE_CROP_H },
+                              { 0, 0, PLAYER_DRAW_W, PLAYER_DRAW_H },
+                              SDL_FLIP_NONE },
+        PhysicsBodyComponent{ body, shape, false, 0, 0 },
+        PlayerInputComponent{ false, false, false, false, false, 0 },
+        PlayerStateComponent{ 3, 1.0f, -1, false, false, 0 },
         GravityShiftComponent{ false, 0.f, 3000.f },
         AnimationComponent  { 0, 0.f, 80.f }
     );
@@ -56,22 +62,66 @@ bagel::Entity createPlatform(b2WorldId world, SDL_Texture* tex,
     e.addAll(
         TransformComponent  { posPx, 0.f },
         DrawableComponent   { tex, {0, 0, widthPx, heightPx}, {0, 0, widthPx, heightPx}, 0 },
-        PhysicsBodyComponent{ body, shape, false, 0 }
+        PhysicsBodyComponent{ body, shape, false, 0, 0 }
     );
     return e;
 }
 
-bagel::Entity createItemBox(SDL_Texture* tex, SDL_FPoint posPx, int sensorTypeId)
+bagel::Entity createPhysicsPlatform(b2WorldId world, SDL_FPoint centerPx,
+                                    float widthPx, float heightPx)
 {
+    b2BodyDef bodyDef = b2DefaultBodyDef();
+    bodyDef.type      = b2_staticBody;
+    bodyDef.position  = { centerPx.x / BOX_SCALE, centerPx.y / BOX_SCALE };
+    b2BodyId body     = b2CreateBody(world, &bodyDef);
+
+    b2ShapeDef shapeDef = b2DefaultShapeDef();
+    b2Polygon box = b2MakeBox(widthPx / 2.f / BOX_SCALE, heightPx / 2.f / BOX_SCALE);
+    b2ShapeId shape = b2CreatePolygonShape(body, &shapeDef, &box);
+
     Entity e = Entity::create();
     e.addAll(
-        TransformComponent { posPx, 0.f },
-        DrawableComponent  { tex, {0, 0, 24, 24}, {0, 0, 24, 24}, 0 },
-        SensorAreaComponent{ sensorTypeId, false }
+        TransformComponent  { centerPx, 0.f },
+        PhysicsBodyComponent{ body, shape, false, 0, 0 }
     );
     return e;
-    // TODO: attach a Box2D sensor shape (isSensor = true, enableSensorEvents = true)
-    //       once a static body for sensor-only entities is wired up.
+}
+
+bagel::Entity createItemBox(b2WorldId world, SDL_Texture* tex,
+                            SDL_FPoint posPx, int sensorTypeId)
+{
+    return createSensorArea(world, tex, posPx, 24.f, 24.f, sensorTypeId);
+}
+
+bagel::Entity createSensorArea(b2WorldId world, SDL_Texture* tex,
+                               SDL_FPoint centerPx, float widthPx, float heightPx,
+                               int sensorTypeId)
+{
+    b2BodyDef bodyDef = b2DefaultBodyDef();
+    bodyDef.type      = b2_staticBody;
+    bodyDef.position  = { centerPx.x / BOX_SCALE, centerPx.y / BOX_SCALE };
+    b2BodyId body     = b2CreateBody(world, &bodyDef);
+
+    b2ShapeDef shapeDef = b2DefaultShapeDef();
+    shapeDef.isSensor           = true;
+    shapeDef.enableSensorEvents = true;
+    b2Polygon box = b2MakeBox(widthPx / 2.f / BOX_SCALE, heightPx / 2.f / BOX_SCALE);
+    b2ShapeId shape = b2CreatePolygonShape(body, &shapeDef, &box);
+
+    Entity e = Entity::create();
+    if (tex) {
+        e.addAll(
+            TransformComponent  { centerPx, 0.f },
+            DrawableComponent   { tex, {0, 0, widthPx, heightPx}, {0, 0, widthPx, heightPx}, 0 },
+            SensorAreaComponent { shape, sensorTypeId, false }
+        );
+    } else {
+        e.addAll(
+            TransformComponent  { centerPx, 0.f },
+            SensorAreaComponent { shape, sensorTypeId, false }
+        );
+    }
+    return e;
 }
 
 bagel::Entity createProjectile(b2WorldId world, SDL_Texture* tex, SDL_FPoint posPx,
@@ -93,7 +143,7 @@ bagel::Entity createProjectile(b2WorldId world, SDL_Texture* tex, SDL_FPoint pos
     e.addAll(
         TransformComponent  { posPx, 0.f },
         DrawableComponent   { tex, {0, 0, 16, 16}, {0, 0, 16, 16}, 0 },
-        PhysicsBodyComponent{ body, shape, false, 0 },
+        PhysicsBodyComponent{ body, shape, false, 0, 0 },
         TrapComponent       { 0.5f, 1.5f, ownerEntityId }
     );
     return e;
@@ -107,6 +157,16 @@ bagel::Entity createDecoration(SDL_Texture* tex,
         TransformComponent { posPx, 0.f },
         DrawableComponent  { tex, {0, 0, widthPx, heightPx}, {0, 0, widthPx, heightPx}, 0 }
     );
+    return e;
+}
+
+bagel::Entity createCoin(b2WorldId world, SDL_Texture* tex,
+                         SDL_FPoint centerPx, int value)
+{
+    constexpr float kCoinDraw = 36.f;
+    Entity e = createSensorArea(world, tex, centerPx, kCoinDraw, kCoinDraw,
+                                SensorType::Coin);
+    e.add(CoinComponent{ value });
     return e;
 }
 

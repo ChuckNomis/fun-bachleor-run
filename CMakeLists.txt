@@ -6,6 +6,7 @@ add_executable(funrun
     src/main.cpp
     src/Game.cpp
     src/EntityFactory.cpp
+    src/LevelBuilder.cpp
     src/Systems.cpp
     lib/bagel26/bagel.h)
 

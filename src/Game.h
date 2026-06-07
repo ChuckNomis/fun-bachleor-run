@@ -4,6 +4,8 @@
 #include <SDL3_image/SDL_image.h>
 #include <box2d/box2d.h>
 #include "bagel.h"
+#include "TileMap.h"
+#include <vector>
 
 inline constexpr float BOX_SCALE     = 50.0f;   // pixels per Box2D meter
 inline constexpr int   SCREEN_W      = 1280;
@@ -21,15 +23,23 @@ public:
 
 private:
     void init_world();
+    void reset_race();
+    bool any_player_finished() const;
 
     SDL_Window*   _window      = nullptr;
     SDL_Renderer* _renderer    = nullptr;
     SDL_Texture*  _spritesheet  = nullptr;
-    SDL_Texture*  _mapTexture   = nullptr;  // unused in simple level, kept for SystemContext
-    SDL_Texture*  _platTexture   = nullptr;  // solid green for platforms
-    SDL_Texture*  _groundTexture = nullptr;  // solid brown for ground
-    SDL_Texture*  _startTex      = nullptr;  // bright green start-line pole
-    SDL_Texture*  _finishTex     = nullptr;  // red finish-line pole
+    SDL_Texture*  _terrainTile  = nullptr;
+    SDL_Texture*  _finishPole   = nullptr;
+    SDL_Texture*  _finishSign   = nullptr;
+    SDL_Texture*  _coinTex      = nullptr;
+    std::vector<SDL_FPoint> _coinSpawns;
+    TileMap       _tileMap;
+    float         _levelWidthPx  = 3200.f;
+    float         _levelHeightPx = 640.f;
+    float         _mapCameraY   = 0.f;
+    SDL_FPoint    _playerStart  { 200.f, 330.f };
+    SDL_FPoint    _finishSensor { 3050.f, 450.f };
     b2WorldId     _physicsWorld{};
     bool          _running     = false;
 

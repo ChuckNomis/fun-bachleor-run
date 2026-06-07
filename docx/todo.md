@@ -5,7 +5,12 @@
 
 ---
 
-## 1. Fix Spam Jump
+## 1. Fix Spam Jump ✅
+
+> **Done.** `jump_lock_frames` on `PhysicsBodyComponent`; controller gates on
+> `is_grounded && jump_lock_frames == 0`; physics decrements the lock each frame.
+> Grounded uses Box2D contact normals (better than the velocity window in the
+> original spec).
 
 **Problem:** The player can jump multiple times without landing. The grounded check in
 `physics_system` (`Systems.cpp:103`) uses a velocity threshold — when the player is at
@@ -28,7 +33,9 @@ jump on the same press.
 
 ---
 
-## 2. Make the Player Smaller
+## 2. Make the Player Smaller ✅
+
+> **Done.** `PLAYER_DRAW_W/H = 56.f` in `EntityFactory.cpp`.
 
 **Problem:** The player is drawn at 80×80 px which is too large relative to the platforms.
 
@@ -46,7 +53,9 @@ bottom-align logic in `render_system` (`PLAYER_BODY_HH = 24.f`).
 
 ---
 
-## 3. Fix the PNG Spritesheet
+## 3. Fix the PNG Spritesheet ✅
+
+> **Done.** `1774.f / 4.f` and `887.f / 2.f` in both `EntityFactory.cpp` and `Systems.cpp`.
 
 **Problem:** The spritesheet (`res/spritesheet.png`) is **1774×887 px**. The code hardcodes
 frame dimensions as `443×443`, but the real frame size is `443.5×443.5` (1774÷4, 887÷2).
@@ -72,7 +81,10 @@ SDL3 src rects are floats, so the half-pixel value is valid.
 
 ---
 
-## 4. Camera Zoom In
+## 4. Camera Zoom In ✅
+
+> **Done.** `CAMERA_ZOOM = 1.5f`, `SystemContext::zoom`, camera + render scaling,
+> `GROUND_Y = 370`.
 
 **Problem:** The camera renders the world at 1:1 scale. Everything looks small on a
 1280×720 screen. We want the world to appear ≈1.5× bigger (zoomed in).
@@ -115,7 +127,10 @@ The `render_system` computes each entity's screen position as
 
 ---
 
-## 5. Build the Map — Platforms & Style
+## 5. Build the Map — Platforms & Style ✅
+
+> **Done.** 5-section level in `Game.cpp` (`LEVEL_W = 5000`, steel-blue platforms,
+> brown ground).
 
 **Problem:** The current level is a simple row of 10 identically-spaced platforms. It needs
 a designed layout with clear sections of increasing difficulty, visual variety, and room to
@@ -156,7 +171,10 @@ to change — `createPlatform` already accepts any texture.
 
 ---
 
-## 6. Add Start Line and Finish Line
+## 6. Add Start Line and Finish Line ✅
+
+> **Done.** `_startTex` / `_finishTex`, `createDecoration()`, poles at x=150 and
+> x=LEVEL_W−150.
 
 **Problem:** There is no visual indicator of where the race begins or ends.
 
@@ -198,7 +216,7 @@ a Box2D sensor shape + `SensorAreaComponent` needs to be added (separate task).
 
 | Task | Notes |
 |------|-------|
-| Finish line triggers end of round | Need sensor shape on the finish pole entity + logic in `sensor_system` |
+| Finish line triggers end of round | ✅ Sensor + `sensor_system` + win overlay + R to restart |
 | Grounded via Box2D contacts | Replace velocity heuristic with `b2Body_GetContactData` — more reliable on slopes |
 | Player falls off screen → respawn | Add a kill-plane (y > GROUND_Y + 200) check in a new system |
 | 2–4 local players | Extend `createPlayer` with keyboard mappings; camera tracks the leader |
