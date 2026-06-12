@@ -1,57 +1,76 @@
 #include "LevelBuilder.h"
 #include "Components.h"
 #include "EntityFactory.h"
+#include "Game.h"
 #include "TileConfig.h"
 #include <bagel.h>
+#include <unordered_map>
 #include <vector>
 
 namespace {
 
 enum CharCell : char {
-    CEmpty  = '.',
-    CGrass  = 'G',
-    CDirt   = 'D',
-    CFinish = 'F',
+    CEmpty         = '.',
+    CGrass         = 'G',
+    CDirt          = 'D',
+    CFinish        = 'F',
+    CCloud         = 'C',
+    CCoin          = 'O',
+    CQuestionBlock = 'Q',
 };
 
-constexpr int kGroundRow = 7;
-constexpr int kFinishCol = 48;
+constexpr int kGroundRow  = 14;
+constexpr int kFinishCol  = 96;
+constexpr int kStartCol   = 3;
 
-// 50 × 10 tiles (3200 × 640 px).
+// 100 × 20 tiles  (6400 × 1280 px)
 constexpr const char* kRows[] = {
-    "..................................................",
-    "..................................................",
-    "..................................................",
-    "..................................................",
-    "..........GGGG..............GGGG..................",
-    "................GGGG.............GGGG.............",
-    ".....GGGG...........................GGGG..........",
-    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGFFFF",
-    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
-    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    "....................................................................................................",
+    "....................................................................................................",
+    "....................................................................................................",
+    ".............CCC.................................................................................CC.",
+    "..........................CCCC........CCCCCC..........CCC...........................................",
+    "...CCC...........................................O.......................Q....O.....................",
+    "............................................................................CCCCCC.......CCC........",
+    "...............O...............................CCCCC................................................",
+    ".................................Q..............................GGGGGGG.............................",
+    ".........Q..........GGGGG..............GGGGGG.......................................................",
+    "...............................DDDD.................................................................",
+    ".......GGGGG...................DDDDD....................GGGGGG............GGGGGGGGG.................",
+    "......................Q.......DDDDDD.............Q..................................................",
+    ".............................DDDDDDD................................................................",
+    "GGGGGGGGGGGGGG...GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG.....GGGGGGGGGGGGGGGGGGGGGGGGGGFFFF",
+    "DDDDDDDDDDDDDD...DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD..O..DDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
 };
 
-constexpr int kCols     = 50;
-constexpr int kRowCount = 10;
+constexpr int kCols     = 100;
+constexpr int kRowCount = 20;
 
 bool isSolid(TileCell c)
 {
-    return c == TileCell::Grass || c == TileCell::Dirt || c == TileCell::Finish;
+    return c == TileCell::Grass || c == TileCell::Dirt
+        || c == TileCell::Finish || c == TileCell::Cloud;
+    // QuestionBlock is NOT merged — each gets its own body so it can be destroyed individually.
 }
 
 bool isWalkSurface(TileCell c)
 {
-    return c == TileCell::Grass || c == TileCell::Finish;
+    return c == TileCell::Grass || c == TileCell::Finish
+        || c == TileCell::QuestionBlock;
 }
 
 TileCell fromChar(char c)
 {
-    if (c == CGrass)
-        return TileCell::Grass;
-    if (c == CDirt)
-        return TileCell::Dirt;
-    if (c == CFinish)
-        return TileCell::Finish;
+    if (c == CGrass)         return TileCell::Grass;
+    if (c == CDirt)          return TileCell::Dirt;
+    if (c == CFinish)        return TileCell::Finish;
+    if (c == CCloud)         return TileCell::Cloud;
+    if (c == CCoin)          return TileCell::Coin;
+    if (c == CQuestionBlock) return TileCell::QuestionBlock;
     return TileCell::Empty;
 }
 
@@ -115,11 +134,52 @@ SDL_FPoint coinAboveTile(int col, int row)
     return { x, y };
 }
 
+void addQBlockPhysics(b2WorldId world, const TileMap& map,
+                      std::unordered_map<uint32_t, bagel::Entity>& out)
+{
+    for (int row = 0; row < map.rows; ++row) {
+        for (int col = 0; col < map.cols; ++col) {
+            if (map.at(col, row) != TileCell::QuestionBlock)
+                continue;
+
+            const float cx = (static_cast<float>(col) + 0.5f) * TILE_SIZE;
+            const float cy = (static_cast<float>(row) + 0.5f) * TILE_SIZE;
+
+            // Solid body but filtered to never collide with the player (PHYS_CAT_DEFAULT).
+            // The player's shape mask excludes PHYS_CAT_QBLOCK, so no physical interaction
+            // occurs from any direction. Head-hit detection in qblock_system is position-based.
+            b2BodyDef bodyDef  = b2DefaultBodyDef();
+            bodyDef.type       = b2_staticBody;
+            bodyDef.position.x = cx / BOX_SCALE;
+            bodyDef.position.y = cy / BOX_SCALE;
+            b2BodyId body      = b2CreateBody(world, &bodyDef);
+
+            b2ShapeDef shapeDef          = b2DefaultShapeDef();
+            shapeDef.filter.categoryBits = PHYS_CAT_QBLOCK;
+            shapeDef.filter.maskBits     = 0; // collides with nothing
+            const float hw  = static_cast<float>(TILE_SIZE) * 0.5f / BOX_SCALE;
+            b2Polygon   box = b2MakeBox(hw, hw);
+            b2ShapeId   shape = b2CreatePolygonShape(body, &shapeDef, &box);
+
+            bagel::Entity e = bagel::Entity::create();
+            e.addAll(
+                TransformComponent  { { cx, cy }, 0.f },
+                PhysicsBodyComponent{ body, shape, false, 0, 0 }
+            );
+
+            const uint32_t key = static_cast<uint32_t>(col)
+                               | (static_cast<uint32_t>(row) << 16);
+            out.emplace(key, e);
+        }
+    }
+}
+
 void collectCoinSpawns(const TileMap& map, std::vector<SDL_FPoint>& out)
 {
     out.clear();
 
-    for (int row = 0; row < map.rows; ++row) {
+    // Coins above the midpoint of every floating platform (rows above ground)
+    for (int row = 0; row < kGroundRow; ++row) {
         int segStart = -1;
         for (int col = 0; col <= map.cols; ++col) {
             const bool grass = col < map.cols && map.at(col, row) == TileCell::Grass;
@@ -130,7 +190,7 @@ void collectCoinSpawns(const TileMap& map, std::vector<SDL_FPoint>& out)
             if (!grass && segStart >= 0) {
                 const int   midCol = (segStart + col - 1) / 2;
                 const float topY   = static_cast<float>(row) * TILE_SIZE;
-                if (row < kGroundRow && map.at(midCol, row - 1) == TileCell::Empty)
+                if (row > 0 && map.at(midCol, row - 1) == TileCell::Empty)
                     out.push_back({ static_cast<float>(midCol) * TILE_SIZE + TILE_SIZE * 0.5f,
                                     topY - 20.f });
                 segStart = -1;
@@ -138,12 +198,18 @@ void collectCoinSpawns(const TileMap& map, std::vector<SDL_FPoint>& out)
         }
     }
 
-    constexpr int kGroundCoins[] = { 8, 14, 20, 26, 32, 38, 42 };
+    // Explicit coins on the main ground segments
+    constexpr int kGroundCoins[] = { 7, 26, 40, 56, 71, 88 };
     for (int col : kGroundCoins)
         out.push_back(coinAboveTile(col, kGroundRow));
 
-    out.push_back(coinAboveTile(44, kGroundRow));
-    out.push_back(coinAboveTile(45, kGroundRow));
+    // Coins placed with 'O' tiles
+    for (int row = 0; row < map.rows; ++row) {
+        for (int col = 0; col < map.cols; ++col) {
+            if (map.at(col, row) == TileCell::Coin)
+                out.push_back(coinAboveTile(col, row));
+        }
+    }
 }
 
 } // namespace
@@ -199,14 +265,16 @@ BuiltLevel buildTileLevel(b2WorldId world, TileMap& tileMap,
     for (int row = 0; row < tileMap.rows; ++row)
         addMergedRowPhysics(world, row, tileMap);
 
-    constexpr int kStartCol = 3;
-    const int     startRow  = topGrassRowAtCol(tileMap, kStartCol);
-    const int     finishRow = topGrassRowAtCol(tileMap, kFinishCol);
+    addQBlockPhysics(world, tileMap, level.qBlockBodies);
+
+    const int startRow  = topGrassRowAtCol(tileMap, kStartCol);
+    const int finishRow = topGrassRowAtCol(tileMap, kFinishCol);
 
     if (startRow >= 0) {
         const float surfaceY = static_cast<float>(startRow) * static_cast<float>(TILE_SIZE);
-        level.playerStart    = { static_cast<float>(kStartCol) * TILE_SIZE + TILE_SIZE * 0.5f,
-                                 surfaceY - 36.f };
+        // offset = body HH (36) + 12px gap above ground
+        level.playerStart = { static_cast<float>(kStartCol) * TILE_SIZE + TILE_SIZE * 0.5f,
+                              surfaceY - 48.f };
     }
 
     if (finishRow >= 0) {

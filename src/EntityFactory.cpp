@@ -6,8 +6,8 @@
 using bagel::Entity;
 
 // On-screen rendered size of the player character
-static constexpr float PLAYER_DRAW_W  = 64.f;
-static constexpr float PLAYER_DRAW_H  = 64.f;
+static constexpr float PLAYER_DRAW_W  = 96.f;
+static constexpr float PLAYER_DRAW_H  = 96.f;
 
 bagel::Entity createPlayer(b2WorldId world, SDL_Texture* tex,
                            SDL_FPoint startPosPx, int /*playerIndex*/)
@@ -22,11 +22,13 @@ bagel::Entity createPlayer(b2WorldId world, SDL_Texture* tex,
     shapeDef.density    = 1.0f;
     shapeDef.material.friction = 0.f; // slide off platform edges instead of snagging
     shapeDef.enableSensorEvents = true;
+    shapeDef.filter.categoryBits = PHYS_CAT_DEFAULT;
+    shapeDef.filter.maskBits     = PHYS_CAT_DEFAULT; // don't collide with Q-block bodies
     // Capsule slides past platform corners better than a box.
     b2Capsule capsule = {
-        { 0.f, -14.f / BOX_SCALE },
-        { 0.f,  14.f / BOX_SCALE },
-        10.f / BOX_SCALE
+        { 0.f, -21.f / BOX_SCALE },
+        { 0.f,  21.f / BOX_SCALE },
+        15.f / BOX_SCALE
     };
     b2ShapeId shape = b2CreateCapsuleShape(body, &shapeDef, &capsule);
 

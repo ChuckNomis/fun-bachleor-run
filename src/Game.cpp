@@ -123,7 +123,8 @@ static SDL_Texture* loadTerrainTexture(SDL_Renderer* renderer, const char* path)
     return tex;
 }
 
-static SDL_Texture* cropTile(SDL_Renderer* renderer, const char* path, int sx, int sy)
+static SDL_Texture* cropTile(SDL_Renderer* renderer, const char* path, int sx, int sy,
+                              int srcW = TILE_SIZE, int srcH = TILE_SIZE)
 {
     SDL_Surface* loaded = IMG_Load(path);
     if (!loaded)
@@ -136,13 +137,13 @@ static SDL_Texture* cropTile(SDL_Renderer* renderer, const char* path, int sx, i
 
     keyOutBlackPixels(rgba);
 
-    SDL_Surface* tile = SDL_CreateSurface(TILE_SIZE, TILE_SIZE, SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface* tile = SDL_CreateSurface(srcW, srcH, SDL_PIXELFORMAT_RGBA32);
     if (!tile) {
         SDL_DestroySurface(rgba);
         return nullptr;
     }
 
-    SDL_Rect src{ sx, sy, TILE_SIZE, TILE_SIZE };
+    SDL_Rect src{ sx, sy, srcW, srcH };
     SDL_BlitSurface(rgba, &src, tile, nullptr);
     SDL_DestroySurface(rgba);
 
@@ -215,15 +216,17 @@ Game::Game()
     _terrainTile = loadTerrainTexture(_renderer, TERRAIN_TILE_PATH);
     _finishPole  = makeSolidTex(_renderer, 210, 50, 50);
     _finishSign  = cropTile(_renderer, "res/tiles.png", TILE_SIGN_X, TILE_SIGN_Y);
-    _coinTex     = loadCoinTexture(_renderer, "res/coin.png");
+    _coinTex      = loadCoinTexture(_renderer, "res/coin.png");
+    _questionTile = cropTile(_renderer, "res/tiles.png", 1032, 1584, 256, 256);
 
     b2WorldDef worldDef = b2DefaultWorldDef();
     worldDef.gravity    = { 0.f, 9.81f };
     _physicsWorld       = b2CreateWorld(&worldDef);
 
-    const BuiltLevel level = buildTileLevel(_physicsWorld, _tileMap,
-                                            _finishPole, _finishSign, _coinTex);
+    BuiltLevel level = buildTileLevel(_physicsWorld, _tileMap,
+                                     _finishPole, _finishSign, _coinTex);
     _coinSpawns            = level.coinSpawns;
+    _qBlockBodies          = std::move(level.qBlockBodies);
     _levelWidthPx          = level.widthPx;
     _levelHeightPx         = level.heightPx;
     _mapCameraY            = level.cameraY;
@@ -242,6 +245,7 @@ Game::~Game()
     SDL_DestroyTexture(_finishPole);
     SDL_DestroyTexture(_finishSign);
     SDL_DestroyTexture(_coinTex);
+    SDL_DestroyTexture(_questionTile);
     SDL_DestroyRenderer(_renderer);
     SDL_DestroyWindow(_window);
     SDL_Quit();
@@ -320,7 +324,10 @@ void Game::run()
         _mapCameraY,
         CAMERA_ZOOM,
         &_tileMap,
-        _terrainTile
+        _terrainTile,
+        _questionTile,
+        &_qBlockBodies,
+        &_bouncingQBlocks
     };
 
     Uint64 frameStart = SDL_GetTicks();
@@ -348,6 +355,7 @@ void Game::run()
         physics_system(ctx);
         sensor_system(ctx);
         damage_system(ctx);
+        qblock_system(ctx);
         camera_system(ctx);
         render_system(ctx);
 

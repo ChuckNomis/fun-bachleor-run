@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Fun Run — Level Designer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #12141f;
+      --panel:    #1c2033;
+      --panel2:   #242840;
+      --accent:   #e94560;
+      --accent2:  #7b5ea7;
+      --green:    #3ecf6e;
+      --text:     #dde3f0;
+      --dim:      #7a89aa;
+      --border:   #2e3555;
+      --hover:    #2a3050;
+      --ts: 32px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Header ─────────────────────────────── */
+    #header {
+      background: var(--panel);
+      border-bottom: 2px solid var(--accent);
+      padding: 0 14px;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    #header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-right: 4px;
+    }
+
+    .sep { width: 1px; height: 26px; background: var(--border); flex-shrink: 0; }
+
+    .btn {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 11px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .btn:hover  { background: var(--hover); border-color: var(--accent); }
+    .btn.active { background: var(--hover); border-color: var(--green); color: var(--green); }
+    .btn.export { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .btn.export:hover { background: #c83350; }
+    .btn:disabled { opacity: 0.35; pointer-events: none; }
+
+    #zoom-label { font-size: 12px; color: var(--dim); min-width: 38px; text-align: center; }
+
+    /* ── Main area ───────────────────────────── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sidebar ─────────────────────────────── */
+    #sidebar {
+      width: 168px;
+      background: var(--panel);
+      border-right: 2px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow-y: auto;
+    }
+
+    .sec { padding: 10px; border-bottom: 1px solid var(--border); }
+    .sec-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--dim);
+      margin-bottom: 8px;
+    }
+
+    /* Tile buttons */
+    .tile-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 6px;
+      border-radius: 5px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      margin-bottom: 3px;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .tile-btn:hover  { background: var(--hover); }
+    .tile-btn.active { border-color: var(--accent); background: rgba(233,69,96,0.15); }
+
+    .tile-thumb {
+      width: 28px; height: 28px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,0.1);
+      image-rendering: pixelated;
+    }
+    .tile-info .tile-name  { font-size: 12px; font-weight: 600; }
+    .tile-info .tile-key   { font-size: 10px; color: var(--dim); }
+
+    /* Tool buttons */
+    .tools-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+    }
+    .tool-btn {
+      padding: 8px 4px 5px;
+      text-align: center;
+      border: 2px solid var(--border);
+      border-radius: 5px;
+      cursor: pointer;
+      background: var(--panel2);
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .tool-btn:hover  { border-color: var(--accent); background: var(--hover); }
+    .tool-btn.active { border-color: var(--green);  background: rgba(62,207,110,0.12); }
+    .tool-icon  { font-size: 18px; line-height: 1; }
+    .tool-label { font-size: 9px; color: var(--dim); margin-top: 3px; }
+
+    /* Keyboard hints */
+    .kbd-table { width: 100%; border-collapse: collapse; font-size: 10px; color: var(--dim); }
+    .kbd-table td { padding: 2px 0; }
+    .kbd-table td:first-child { color: var(--text); }
+    kbd {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0 4px;
+      font-size: 10px;
+      color: var(--text);
+    }
+
+    /* Tiles.png reference */
+    #tiles-ref {
+      width: 100%;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      image-rendering: pixelated;
+      display: block;
+    }
+
+    /* ── Canvas area ─────────────────────────── */
+    #canvas-wrap {
+      flex: 1;
+      overflow: auto;
+      background: #0b0d18;
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+
+    #ruler-corner { position: sticky; left: 0; top: 0; z-index: 3; background: #0b0d18; }
+
+    #ruler-container {
+      position: relative;
+      display: inline-block;
+      padding: 22px 0 0 28px;
+    }
+
+    #ruler-h {
+      position: absolute;
+      top: 0; left: 28px;
+      height: 22px;
+      pointer-events: none;
+    }
+    #ruler-v {
+      position: absolute;
+      top: 22px; left: 0;
+      width: 28px;
+      pointer-events: none;
+    }
+
+    #grid-canvas {
+      display: block;
+      cursor: crosshair;
+      image-rendering: pixelated;
+    }
+
+    /* ── Status bar ──────────────────────────── */
+    #status {
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      padding: 0 16px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 11px;
+      color: var(--dim);
+      flex-shrink: 0;
+    }
+    #status span b { color: var(--text); font-weight: 600; }
+
+    /* ── Modals ──────────────────────────────── */
+    .overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 50;
+    }
+    .overlay.hidden { display: none; }
+
+    .modal {
+      background: var(--panel);
+      border: 2px solid var(--accent);
+      border-radius: 10px;
+      padding: 22px 24px;
+      width: min(680px, 92vw);
+    }
+    .modal h2 { font-size: 15px; color: var(--accent); margin-bottom: 14px; }
+    .modal textarea {
+      width: 100%;
+      height: 200px;
+      background: #090b14;
+      color: #7dffb0;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      padding: 10px;
+      resize: vertical;
+      outline: none;
+    }
+    .modal-row { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────── -->
+<div id="header">
+  <h1>⚡ Level Designer</h1>
+  <div class="sep"></div>
+  <button class="btn" id="btn-undo"  title="Ctrl+Z">↩ Undo</button>
+  <button class="btn" id="btn-redo"  title="Ctrl+Y">↪ Redo</button>
+  <div class="sep"></div>
+  <button class="btn" id="btn-clear" title="New blank map">🗑 Clear</button>
+  <button class="btn" id="btn-grid"  title="G">⊞ Grid</button>
+  <div class="sep"></div>
+  <button class="btn" id="btn-zoom-out" title="−">−</button>
+  <span   id="zoom-label">100%</span>
+  <button class="btn" id="btn-zoom-in"  title="+">+</button>
+  <button class="btn" id="btn-fit"      title="Fit to window">Fit</button>
+  <div class="sep"></div>
+  <button class="btn"        id="btn-import">↑ Import</button>
+  <button class="btn export" id="btn-export">↓ Export Code</button>
+</div>
+
+<!-- ── Main ────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+
+    <div class="sec">
+      <div class="sec-label">Tile</div>
+      <div id="tile-list"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Tool</div>
+      <div class="tools-grid" id="tool-list"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Keys</div>
+      <table class="kbd-table">
+        <tr><td>1–4</td><td>Select tile</td></tr>
+        <tr><td>P E F L</td><td>Tools</td></tr>
+        <tr><td><kbd>Ctrl Z/Y</kbd></td><td>Undo/Redo</td></tr>
+        <tr><td>G</td><td>Toggle grid</td></tr>
+        <tr><td>Scroll</td><td>Zoom</td></tr>
+        <tr><td>Right-drag</td><td>Erase</td></tr>
+      </table>
+    </div>
+
+    <div class="sec">
+      <div class="sec-label">Tile Sheet</div>
+      <img id="tiles-ref" src="res/tiles.png" alt="tiles.png">
+    </div>
+
+  </div>
+
+  <!-- Canvas area -->
+  <div id="canvas-wrap">
+    <div id="ruler-container">
+      <canvas id="ruler-h"></canvas>
+      <canvas id="ruler-v"></canvas>
+      <canvas id="grid-canvas"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Status bar ───────────────────────────────── -->
+<div id="status">
+  <span id="st-pos">Col: —  Row: —</span>
+  <span id="st-tile">Tile: —</span>
+  <span id="st-size">Map: 50 × 10</span>
+  <span id="st-zoom">Zoom: 100%</span>
+  <span style="margin-left:auto;color:#444">Left: paint  ·  Right: erase  ·  Ctrl+Scroll: zoom</span>
+</div>
+
+<!-- ── Export modal ─────────────────────────────── -->
+<div class="overlay hidden" id="modal-export">
+  <div class="modal">
+    <h2>↓ Export — paste into <code>kRows[]</code> in LevelBuilder.cpp</h2>
+    <textarea id="export-ta" readonly></textarea>
+    <div class="modal-row">
+      <button class="btn export" id="btn-copy">📋 Copy to Clipboard</button>
+      <button class="btn" id="btn-export-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Import modal ─────────────────────────────── -->
+<div class="overlay hidden" id="modal-import">
+  <div class="modal">
+    <h2>↑ Import — paste <code>kRows[]</code> content</h2>
+    <textarea id="import-ta" placeholder='Paste rows here, e.g.:
+"..................................................",
+"..................................................",
+"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGFFFF",
+"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",'></textarea>
+    <div class="modal-row">
+      <button class="btn export" id="btn-do-import">↑ Load Map</button>
+      <button class="btn" id="btn-import-close">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ─── Config ──────────────────────────────────────
+const COLS = 100;
+const ROWS = 20;
+const BASE = 32;   // px per tile at zoom=1
+
+const TILES = [
+  { char: '.', name: 'Empty',    shortcut: '1' },
+  { char: 'G', name: 'Grass',    shortcut: '2' },
+  { char: 'D', name: 'Dirt',     shortcut: '3' },
+  { char: 'F', name: 'Finish',   shortcut: '4' },
+  { char: 'C', name: 'Cloud',    shortcut: '5' },
+  { char: 'O', name: 'Coin',     shortcut: '6' },
+  { char: 'Q', name: 'Q-Block',  shortcut: '7' },
+];
+
+const TOOLS = [
+  { id: 'pencil', icon: '✏️',  label: 'Pencil',  key: 'p' },
+  { id: 'eraser', icon: '🧹', label: 'Eraser',  key: 'e' },
+  { id: 'fill',   icon: '🪣', label: 'Fill',    key: 'f' },
+  { id: 'line',   icon: '📏',  label: 'Line',    key: 'l' },
+];
+
+const INITIAL = [
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "....................................................................................................",
+  "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGFFFF",
+  "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+  "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+  "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+  "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+  "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+];
+
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+const RULER_W = 28;
+const RULER_H = 22;
+
+// ─── State ───────────────────────────────────────
+let mapData   = new Array(COLS * ROWS).fill('.');
+let zoom      = 2;         // index into ZOOM_STEPS
+let showGrid  = true;
+let activeTile = 'G';
+let activeTool = 'pencil';
+
+let isDrawing    = false;
+let lastCell     = null;
+let lineStart    = null;
+let lineSnapshot = null;  // mapData clone before line starts
+
+let undoStack = [];
+let redoStack = [];
+const UNDO_MAX = 60;
+
+let terrainImg = null;
+
+// ─── Helpers ─────────────────────────────────────
+const idx  = (c, r)  => r * COLS + c;
+const get  = (c, r)  => mapData[idx(c, r)] ?? '.';
+const set  = (c, r, v) => { mapData[idx(c, r)] = v; };
+const ts   = ()       => Math.round(BASE * ZOOM_STEPS[zoom]);
+
+function cloneMap(m) { return m.slice(); }
+
+function initMap(rows) {
+  for (let r = 0; r < ROWS; r++) {
+    const s = (rows && rows[r]) || INITIAL[r] || '';
+    for (let c = 0; c < COLS; c++)
+      mapData[idx(c, r)] = s[c] || '.';
+  }
+}
+
+// ─── Undo/Redo ───────────────────────────────────
+function pushUndo() {
+  undoStack.push(cloneMap(mapData));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack = [];
+  syncUndoButtons();
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(cloneMap(mapData));
+  mapData = undoStack.pop();
+  syncUndoButtons();
+  repaint();
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(cloneMap(mapData));
+  mapData = redoStack.pop();
+  syncUndoButtons();
+  repaint();
+}
+function syncUndoButtons() {
+  document.getElementById('btn-undo').disabled = !undoStack.length;
+  document.getElementById('btn-redo').disabled = !redoStack.length;
+}
+
+// ─── Flood fill ──────────────────────────────────
+function floodFill(col, row, target, replacement) {
+  if (target === replacement) return;
+  if (get(col, row) !== target) return;
+  const q = [[col, row]];
+  const visited = new Uint8Array(COLS * ROWS);
+  while (q.length) {
+    const [c, r] = q.pop();
+    if (c < 0 || c >= COLS || r < 0 || r >= ROWS) continue;
+    if (visited[idx(c, r)]) continue;
+    if (get(c, r) !== target) continue;
+    visited[idx(c, r)] = 1;
+    set(c, r, replacement);
+    q.push([c+1,r],[c-1,r],[c,r+1],[c,r-1]);
+  }
+}
+
+// ─── Bresenham line ──────────────────────────────
+function linePoints(x0, y0, x1, y1) {
+  const pts = [];
+  let dx = Math.abs(x1-x0), dy = Math.abs(y1-y0);
+  let sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  while (true) {
+    pts.push([x0, y0]);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 <  dx) { err += dx; y0 += sy; }
+  }
+  return pts;
+}
+
+// ─── Canvas setup ────────────────────────────────
+const canvas = document.getElementById('grid-canvas');
+const ctx    = canvas.getContext('2d');
+const rulerH = document.getElementById('ruler-h');
+const rulerV = document.getElementById('ruler-v');
+const rHctx  = rulerH.getContext('2d');
+const rVctx  = rulerV.getContext('2d');
+
+function resizeCanvases() {
+  const t = ts();
+  canvas.width  = COLS * t;
+  canvas.height = ROWS * t;
+  rulerH.width  = COLS * t;
+  rulerH.height = RULER_H;
+  rulerV.width  = RULER_W;
+  rulerV.height = ROWS * t;
+}
+
+let tilesImg = null; // tiles.png for Q-Block
+
+// ─── Tile rendering ──────────────────────────────
+function drawCloud(context, x, y, size) {
+  context.fillStyle = 'rgba(230,240,255,0.88)';
+  context.fillRect(x, y + size*0.42, size, size*0.58);
+  context.beginPath(); context.arc(x+size*0.35, y+size*0.32, size*0.28, 0, Math.PI*2); context.fill();
+  context.beginPath(); context.arc(x+size*0.65, y+size*0.38, size*0.20, 0, Math.PI*2); context.fill();
+  context.beginPath(); context.arc(x+size*0.18, y+size*0.45, size*0.17, 0, Math.PI*2); context.fill();
+}
+
+function drawCoin(context, x, y, size) {
+  context.beginPath();
+  context.arc(x+size/2, y+size/2, size*0.38, 0, Math.PI*2);
+  context.fillStyle = '#FFD700'; context.fill();
+  context.strokeStyle = '#B8860B'; context.lineWidth = Math.max(1, size*0.06); context.stroke();
+  context.beginPath();
+  context.arc(x+size*0.38, y+size*0.36, size*0.1, 0, Math.PI*2);
+  context.fillStyle = 'rgba(255,255,255,0.5)'; context.fill();
+}
+
+function drawQuestionBlock(context, x, y, size) {
+  if (tilesImg && tilesImg.complete && tilesImg.naturalWidth > 0) {
+    context.drawImage(tilesImg, 1040, 1584, 256, 256, x, y, size, size);
+  } else {
+    context.fillStyle = '#FFB800'; context.fillRect(x, y, size, size);
+    context.fillStyle = '#fff'; context.font = `bold ${Math.round(size*0.5)}px sans-serif`;
+    context.textAlign = 'center'; context.textBaseline = 'middle';
+    context.fillText('?', x+size/2, y+size/2);
+  }
+}
+
+function drawTile(context, char, x, y, size) {
+  if (char === '.') return;
+  if (char === 'C') { drawCloud(context, x, y, size); return; }
+  if (char === 'O') { drawCoin(context, x, y, size); return; }
+  if (char === 'Q') { drawQuestionBlock(context, x, y, size); return; }
+
+  if (char === 'G') {
+    if (terrainImg) {
+      context.drawImage(terrainImg,
+        0, 0, terrainImg.naturalWidth, terrainImg.naturalHeight,
+        x, y, size, size);
+    } else {
+      context.fillStyle = '#4a8c3f';
+      context.fillRect(x, y, size, size);
+      context.fillStyle = '#3a7a2f';
+      context.fillRect(x, y, size, size * 0.28);
+    }
+  } else if (char === 'D') {
+    if (terrainImg) {
+      const dirtOff = 30 / 120; // TERRAIN_DIRT_Y / TERRAIN_TEX_H
+      const ih = terrainImg.naturalHeight;
+      const dirtY = Math.round(ih * dirtOff);
+      context.drawImage(terrainImg,
+        0, dirtY, terrainImg.naturalWidth, ih - dirtY,
+        x, y, size, size);
+    } else {
+      context.fillStyle = '#7a4f28';
+      context.fillRect(x, y, size, size);
+    }
+  } else if (char === 'F') {
+    // base: grass
+    if (terrainImg) {
+      context.drawImage(terrainImg,
+        0, 0, terrainImg.naturalWidth, terrainImg.naturalHeight,
+        x, y, size, size);
+    } else {
+      context.fillStyle = '#4a8c3f';
+      context.fillRect(x, y, size, size);
+    }
+    // checkered overlay
+    const sq = Math.max(3, Math.round(size / 5));
+    for (let i = 0; i < size; i += sq) {
+      for (let j = 0; j < size; j += sq) {
+        const even = ((Math.floor(i/sq) + Math.floor(j/sq)) & 1) === 0;
+        context.fillStyle = even ? 'rgba(255,255,255,0.72)' : 'rgba(210,20,40,0.72)';
+        context.fillRect(x + i, y + j,
+          Math.min(sq, size - i), Math.min(sq, size - j));
+      }
+    }
+  }
+}
+
+// ─── Full repaint ────────────────────────────────
+function repaint(preview) {
+  const t = ts();
+  const data = preview || mapData;
+
+  // Sky gradient
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, '#1a3566');
+  sky.addColorStop(1, '#2a6aaa');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Tiles
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const ch = preview ? preview[idx(c,r)] : get(c, r);
+      if (ch === '.') continue;
+      drawTile(ctx, ch, c * t, r * t, t);
+    }
+  }
+
+  // Grid
+  if (showGrid) {
+    ctx.save();
+    // Minor lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (let c = 0; c <= COLS; c++) { ctx.moveTo(c*t+0.5,0); ctx.lineTo(c*t+0.5,canvas.height); }
+    for (let r = 0; r <= ROWS; r++) { ctx.moveTo(0,r*t+0.5); ctx.lineTo(canvas.width,r*t+0.5); }
+    ctx.stroke();
+    // Major lines every 5 cols
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let c = 0; c <= COLS; c += 5) { ctx.moveTo(c*t+0.5,0); ctx.lineTo(c*t+0.5,canvas.height); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  repaintRulers(t);
+}
+
+function repaintRulers(t) {
+  // Horizontal ruler (column numbers)
+  rHctx.fillStyle = '#0d0f1a';
+  rHctx.fillRect(0, 0, rulerH.width, rulerH.height);
+  rHctx.fillStyle = '#4a5580';
+  rHctx.font = '9px "Courier New"';
+  rHctx.textAlign = 'center';
+  rHctx.textBaseline = 'middle';
+  for (let c = 0; c <= COLS; c += 5) {
+    const x = c * t;
+    rHctx.fillStyle = c % 10 === 0 ? '#8a9acc' : '#4a5580';
+    rHctx.fillText(String(c), x, RULER_H / 2);
+    rHctx.strokeStyle = c % 10 === 0 ? '#4a5580' : '#2a3050';
+    rHctx.lineWidth = 0.5;
+    rHctx.beginPath();
+    rHctx.moveTo(x + 0.5, RULER_H - 4);
+    rHctx.lineTo(x + 0.5, RULER_H);
+    rHctx.stroke();
+  }
+
+  // Vertical ruler (row numbers)
+  rVctx.fillStyle = '#0d0f1a';
+  rVctx.fillRect(0, 0, RULER_W, rulerV.height);
+  rVctx.fillStyle = '#8a9acc';
+  rVctx.font = '9px "Courier New"';
+  rVctx.textAlign = 'right';
+  rVctx.textBaseline = 'middle';
+  for (let r = 0; r < ROWS; r++) {
+    rVctx.fillText(String(r), RULER_W - 4, r * t + t / 2);
+  }
+}
+
+// ─── Thumbnail canvases for tile palette ─────────
+function makeTileThumb(char) {
+  const oc = document.createElement('canvas');
+  oc.width = 28; oc.height = 28;
+  oc.className = 'tile-thumb';
+  const oc2 = oc.getContext('2d');
+  if (char === '.') {
+    const g = oc2.createLinearGradient(0,0,0,28);
+    g.addColorStop(0,'#1a3566'); g.addColorStop(1,'#2a6aaa');
+    oc2.fillStyle = g; oc2.fillRect(0,0,28,28);
+    oc2.strokeStyle = 'rgba(255,255,255,0.15)';
+    oc2.strokeRect(0.5,0.5,27,27);
+  } else {
+    drawTile(oc2, char, 0, 0, 28);
+  }
+  return oc;
+}
+
+// ─── Build sidebar UI ────────────────────────────
+function buildSidebar() {
+  // Tile list
+  const tileList = document.getElementById('tile-list');
+  tileList.innerHTML = '';
+  TILES.forEach(t => {
+    const btn = document.createElement('div');
+    btn.className = 'tile-btn' + (t.char === activeTile ? ' active' : '');
+    btn.dataset.char = t.char;
+    btn.appendChild(makeTileThumb(t.char));
+    const info = document.createElement('div');
+    info.className = 'tile-info';
+    info.innerHTML = `<div class="tile-name">${t.name}</div><div class="tile-key">Key ${t.shortcut}</div>`;
+    btn.appendChild(info);
+    btn.addEventListener('click', () => selectTile(t.char));
+    tileList.appendChild(btn);
+  });
+
+  // Tool list
+  const toolList = document.getElementById('tool-list');
+  toolList.innerHTML = '';
+  TOOLS.forEach(t => {
+    const btn = document.createElement('div');
+    btn.className = 'tool-btn' + (t.id === activeTool ? ' active' : '');
+    btn.dataset.tool = t.id;
+    btn.title = `${t.label}  (${t.key.toUpperCase()})`;
+    btn.innerHTML = `<div class="tool-icon">${t.icon}</div><div class="tool-label">${t.label}</div>`;
+    btn.addEventListener('click', () => selectTool(t.id));
+    toolList.appendChild(btn);
+  });
+}
+
+function selectTile(char) {
+  activeTile = char;
+  document.querySelectorAll('.tile-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.char === char));
+}
+
+function selectTool(id) {
+  activeTool = id;
+  lineStart = null;
+  document.querySelectorAll('.tool-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.tool === id));
+}
+
+// ─── Mouse → cell coords ─────────────────────────
+function toCell(e) {
+  const r = canvas.getBoundingClientRect();
+  const t = ts();
+  const c = Math.floor((e.clientX - r.left)  / t);
+  const rw = Math.floor((e.clientY - r.top) / t);
+  if (c < 0 || c >= COLS || rw < 0 || rw >= ROWS) return null;
+  return { c, r: rw };
+}
+
+// ─── Mouse events ────────────────────────────────
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('mousedown', e => {
+  e.preventDefault();
+  const cell = toCell(e);
+  if (!cell) return;
+  const char = e.button === 2 ? '.' :
+               activeTool === 'eraser' ? '.' : activeTile;
+
+  if (activeTool === 'line') {
+    lineStart    = cell;
+    lineSnapshot = cloneMap(mapData);
+    isDrawing    = true;
+    return;
+  }
+
+  pushUndo();
+  isDrawing = true;
+
+  if (activeTool === 'fill') {
+    floodFill(cell.c, cell.r, get(cell.c, cell.r), char);
+    repaint();
+    isDrawing = false;
+    return;
+  }
+
+  set(cell.c, cell.r, char);
+  lastCell = cell;
+  repaint();
+});
+
+canvas.addEventListener('mousemove', e => {
+  const cell = toCell(e);
+
+  // Status bar
+  if (cell) {
+    document.getElementById('st-pos').textContent  = `Col: ${cell.c}  Row: ${cell.r}`;
+    const tile = TILES.find(t => t.char === get(cell.c, cell.r));
+    document.getElementById('st-tile').textContent = `Tile: ${tile ? tile.name : 'Empty'}`;
+  } else {
+    document.getElementById('st-pos').textContent  = 'Col: —  Row: —';
+    document.getElementById('st-tile').textContent = 'Tile: —';
+  }
+
+  if (!isDrawing || !cell) return;
+
+  // Line tool: show preview
+  if (activeTool === 'line' && lineStart) {
+    const preview = cloneMap(lineSnapshot);
+    linePoints(lineStart.c, lineStart.r, cell.c, cell.r)
+      .forEach(([c, r]) => { preview[idx(c, r)] = activeTile; });
+    repaint(preview);
+    return;
+  }
+
+  if (!lastCell || (lastCell.c === cell.c && lastCell.r === cell.r)) return;
+
+  const char = e.buttons === 2 ? '.' :
+               activeTool === 'eraser' ? '.' : activeTile;
+
+  // Interpolate for smooth dragging
+  linePoints(lastCell.c, lastCell.r, cell.c, cell.r)
+    .forEach(([c, r]) => set(c, r, char));
+  lastCell = cell;
+  repaint();
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (!isDrawing) return;
+
+  if (activeTool === 'line' && lineStart) {
+    const cell = toCell(e);
+    pushUndo();
+    mapData = cloneMap(lineSnapshot);
+    if (cell) {
+      linePoints(lineStart.c, lineStart.r, cell.c, cell.r)
+        .forEach(([c, r]) => set(c, r, activeTile));
+    }
+    lineStart    = null;
+    lineSnapshot = null;
+    repaint();
+  }
+
+  isDrawing = false;
+  lastCell  = null;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  if (activeTool !== 'line') { isDrawing = false; lastCell = null; }
+  document.getElementById('st-pos').textContent  = 'Col: —  Row: —';
+  document.getElementById('st-tile').textContent = 'Tile: —';
+});
+
+// ─── Zoom ────────────────────────────────────────
+function applyZoom() {
+  resizeCanvases();
+  repaint();
+  const pct = Math.round(ZOOM_STEPS[zoom] * 100) + '%';
+  document.getElementById('zoom-label').textContent = pct;
+  document.getElementById('st-zoom').textContent    = 'Zoom: ' + pct;
+}
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => {
+  if (zoom < ZOOM_STEPS.length - 1) { zoom++; applyZoom(); }
+});
+document.getElementById('btn-zoom-out').addEventListener('click', () => {
+  if (zoom > 0) { zoom--; applyZoom(); }
+});
+document.getElementById('btn-fit').addEventListener('click', () => {
+  const wrap = document.getElementById('canvas-wrap');
+  const fit = Math.min(
+    (wrap.clientWidth  - 60) / (COLS * BASE),
+    (wrap.clientHeight - 60) / (ROWS * BASE)
+  );
+  zoom = ZOOM_STEPS.reduce((best, z, i) =>
+    Math.abs(z - fit) < Math.abs(ZOOM_STEPS[best] - fit) ? i : best, 0);
+  applyZoom();
+});
+
+document.getElementById('canvas-wrap').addEventListener('wheel', e => {
+  e.preventDefault();
+  if (e.deltaY < 0 && zoom < ZOOM_STEPS.length - 1) { zoom++; applyZoom(); }
+  else if (e.deltaY > 0 && zoom > 0)                { zoom--; applyZoom(); }
+}, { passive: false });
+
+// ─── Grid toggle ─────────────────────────────────
+document.getElementById('btn-grid').addEventListener('click', () => {
+  showGrid = !showGrid;
+  document.getElementById('btn-grid').classList.toggle('active', showGrid);
+  repaint();
+});
+document.getElementById('btn-grid').classList.add('active');
+
+// ─── Clear ───────────────────────────────────────
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!confirm('Clear the entire map?')) return;
+  pushUndo();
+  mapData.fill('.');
+  repaint();
+});
+
+// ─── Export ──────────────────────────────────────
+function buildExportCode() {
+  const lines = ['constexpr const char* kRows[] = {'];
+  for (let r = 0; r < ROWS; r++) {
+    let row = '';
+    for (let c = 0; c < COLS; c++) row += get(c, r);
+    lines.push(`    "${row}",`);
+  }
+  lines.push('};');
+  return lines.join('\n');
+}
+
+document.getElementById('btn-export').addEventListener('click', () => {
+  document.getElementById('export-ta').value = buildExportCode();
+  document.getElementById('modal-export').classList.remove('hidden');
+});
+document.getElementById('btn-export-close').addEventListener('click', () =>
+  document.getElementById('modal-export').classList.add('hidden'));
+document.getElementById('btn-copy').addEventListener('click', () => {
+  navigator.clipboard.writeText(document.getElementById('export-ta').value).then(() => {
+    const b = document.getElementById('btn-copy');
+    const orig = b.textContent;
+    b.textContent = '✅ Copied!';
+    setTimeout(() => b.textContent = orig, 2000);
+  });
+});
+
+// ─── Import ──────────────────────────────────────
+document.getElementById('btn-import').addEventListener('click', () => {
+  document.getElementById('import-ta').value = '';
+  document.getElementById('modal-import').classList.remove('hidden');
+});
+document.getElementById('btn-import-close').addEventListener('click', () =>
+  document.getElementById('modal-import').classList.add('hidden'));
+document.getElementById('btn-do-import').addEventListener('click', () => {
+  const raw = document.getElementById('import-ta').value;
+  const matches = [...raw.matchAll(/"([^"]*)"/g)].map(m => m[1]);
+  if (!matches.length) { alert('Could not find any quoted row strings.'); return; }
+  pushUndo();
+  initMap(matches);
+  document.getElementById('modal-import').classList.add('hidden');
+  repaint();
+});
+
+// ─── Keyboard shortcuts ──────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'TEXTAREA') return;
+  const mod = e.ctrlKey || e.metaKey;
+
+  if (mod && e.key === 'z') { e.preventDefault(); undo(); return; }
+  if (mod && (e.key === 'y' || (e.shiftKey && e.key === 'Z')))
+                            { e.preventDefault(); redo(); return; }
+  if (mod && e.key === 'e') { e.preventDefault(); document.getElementById('btn-export').click(); return; }
+
+  if (!mod) {
+    TILES.forEach(t => { if (e.key === t.shortcut) selectTile(t.char); });
+    TOOLS.forEach(t => { if (e.key === t.key) selectTool(t.id); });
+    if (e.key === 'g') document.getElementById('btn-grid').click();
+    if (e.key === '+' || e.key === '=') document.getElementById('btn-zoom-in').click();
+    if (e.key === '-') document.getElementById('btn-zoom-out').click();
+  }
+});
+
+// ─── Boot ────────────────────────────────────────
+function boot() {
+  initMap();
+  syncUndoButtons();
+
+  terrainImg = new Image();
+  terrainImg.onload = () => {
+    buildSidebar(); // rebuild thumbnails with real texture
+    resizeCanvases();
+    applyZoom();
+  };
+  terrainImg.onerror = () => {
+    console.warn('terrain.png not found — using solid colours');
+    buildSidebar();
+    resizeCanvases();
+    applyZoom();
+  };
+  terrainImg.src = 'res/terrain.png';
+
+  tilesImg = new Image();
+  tilesImg.onload = () => repaint();
+  tilesImg.src = 'res/tiles.png';
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@
 #include "TileConfig.h"
 #include "TileMap.h"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <vector>
@@ -16,15 +17,17 @@ using bagel::World;
 
 namespace {
     constexpr float RAD_TO_DEG    = 180.f / 3.14159265358979323846f;
-    constexpr float RUN_SPEED_MPS = 2.5f;
-    constexpr float JUMP_VY       = 8.5f;
+    constexpr float RUN_SPEED_MPS    = 2.5f;
+    constexpr float JUMP_VY          = 8.5f;
     constexpr int   JUMP_LOCK_FRAMES   = 18;
     constexpr int   COYOTE_FRAMES      = 8;
     constexpr int   JUMP_BUFFER_FRAMES = 10;
     constexpr float GROUND_PROBE_PX    = 14.f; // overlap box below the feet
+    constexpr float ACCEL_PER_SEC    = 0.3f;   // speed multiplier gained per second
+    constexpr float MAX_SPEED_MULT   = 3.0f;   // cap: 3× base speed
 
-    // Physics body half-height (px) — used to bottom-align the sprite to the physics box.
-    constexpr float PLAYER_BODY_HH = 24.f;
+    // Physics body half-height (px) — capsule centers ±21px + radius 15px.
+    constexpr float PLAYER_BODY_HH = 36.f;
 
     struct GroundProbeContext {
         b2ShapeId ownShape;
@@ -177,7 +180,7 @@ void input_system(const SDL_Event* events, int eventCount)
 }
 
 // ──────────────────────────────────────────────────────────────
-void controller_system(const SystemContext& /*ctx*/)
+void controller_system(const SystemContext& ctx)
 {
     static const Mask mask = MaskBuilder()
         .set<PlayerInputComponent>()
@@ -187,17 +190,44 @@ void controller_system(const SystemContext& /*ctx*/)
     static int q = World::createQuery(mask);
 
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
-        auto& in = e.get<PlayerInputComponent>();
-        auto& phys     = e.get<PhysicsBodyComponent>();
-        const auto& state = e.get<PlayerStateComponent>();
+        auto& in    = e.get<PlayerInputComponent>();
+        auto& phys  = e.get<PhysicsBodyComponent>();
+        auto& state = e.get<PlayerStateComponent>();
 
         if (state.has_finished) {
             b2Body_SetLinearVelocity(phys.body_id, { 0.f, 0.f });
             continue;
         }
 
+        // Detect wall hit: contact with a strong rightward normal = wall to the right
+        bool hitWall = false;
+        const int capContacts = b2Body_GetContactCapacity(phys.body_id);
+        if (capContacts > 0) {
+            std::vector<b2ContactData> contacts(static_cast<std::size_t>(capContacts));
+            const int cnt = b2Body_GetContactData(phys.body_id, contacts.data(), capContacts);
+            for (int i = 0; i < cnt; ++i) {
+                if (contacts[static_cast<std::size_t>(i)].manifold.pointCount <= 0)
+                    continue;
+                b2Vec2 n = contacts[static_cast<std::size_t>(i)].manifold.normal;
+                if (B2_ID_EQUALS(contacts[static_cast<std::size_t>(i)].shapeIdB, phys.shape_id)) {
+                    n.x = -n.x; n.y = -n.y;
+                } else if (!B2_ID_EQUALS(contacts[static_cast<std::size_t>(i)].shapeIdA, phys.shape_id)) {
+                    continue;
+                }
+                if (n.x > 0.5f) { hitWall = true; break; }
+            }
+        }
+
+        if (hitWall) {
+            state.current_speed_multiplier = 1.0f;
+        } else {
+            state.current_speed_multiplier = std::min(
+                state.current_speed_multiplier + ACCEL_PER_SEC * ctx.frameDtSec,
+                MAX_SPEED_MULT);
+        }
+
         b2Vec2 vel = b2Body_GetLinearVelocity(phys.body_id);
-        vel.x = in.move_right ? RUN_SPEED_MPS : 0.f;
+        vel.x = in.move_right ? RUN_SPEED_MPS * state.current_speed_multiplier : 0.f;
 
         const bool wantsJump = in.jump_pressed || in.jump_buffer_frames > 0;
         const bool canJump   = (phys.is_grounded || phys.coyote_frames > 0)
@@ -314,6 +344,75 @@ void damage_system(const SystemContext& /*ctx*/)
 }
 
 // ──────────────────────────────────────────────────────────────
+void qblock_system(const SystemContext& ctx)
+{
+    if (!ctx.tileMap || !ctx.qBlockBodies || !ctx.bouncingQBlocks)
+        return;
+
+    static const Mask mask = MaskBuilder()
+        .set<TransformComponent>()
+        .set<PhysicsBodyComponent>()
+        .set<PlayerStateComponent>()
+        .build();
+    static int q = World::createQuery(mask);
+
+    TileMap&    map = *ctx.tileMap;
+    const float ts  = static_cast<float>(TILE_SIZE);
+
+    constexpr float BOUNCE_DURATION = 0.22f; // seconds
+
+    // ── Advance active bounces; clear finished ones ──
+    std::vector<uint32_t> done;
+    for (auto& [key, elapsed] : *ctx.bouncingQBlocks) {
+        elapsed += ctx.frameDtSec;
+        if (elapsed >= BOUNCE_DURATION) {
+            const int col = static_cast<int>(key & 0xFFFF);
+            const int row = static_cast<int>(key >> 16);
+            map.set(col, row, TileCell::Empty);
+            done.push_back(key);
+        }
+    }
+    for (uint32_t k : done)
+        ctx.bouncingQBlocks->erase(k);
+
+    // ── Detect new hits ──
+    for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
+        const auto& phys = e.get<PhysicsBodyComponent>();
+        const b2Vec2 vel = b2Body_GetLinearVelocity(phys.body_id);
+        if (vel.y >= 0.f)
+            continue;
+
+        const auto& pos    = e.get<TransformComponent>().position;
+        const float probeY = pos.y - PLAYER_BODY_HH - 6.f;
+        const int   tileRow = static_cast<int>(std::floor(probeY / ts));
+        const int   colL    = static_cast<int>(std::floor((pos.x - 14.f) / ts));
+        const int   colR    = static_cast<int>(std::floor((pos.x + 14.f) / ts));
+
+        for (int col = colL; col <= colR; ++col) {
+            if (map.at(col, tileRow) != TileCell::QuestionBlock)
+                continue;
+
+            const uint32_t key = static_cast<uint32_t>(col)
+                               | (static_cast<uint32_t>(tileRow) << 16);
+            if (ctx.bouncingQBlocks->count(key))
+                continue; // already bouncing
+
+            // Destroy physics body so player passes through after hit
+            auto it = ctx.qBlockBodies->find(key);
+            if (it != ctx.qBlockBodies->end()) {
+                Entity qe = it->second;
+                ctx.qBlockBodies->erase(it);
+                b2DestroyBody(qe.get<PhysicsBodyComponent>().body_id);
+                qe.destroy();
+            }
+
+            // Start bounce — tile stays visible during animation
+            ctx.bouncingQBlocks->emplace(key, 0.f);
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
 void camera_system(const SystemContext& ctx)
 {
     static const Mask mask = MaskBuilder()
@@ -322,23 +421,27 @@ void camera_system(const SystemContext& ctx)
         .build();
     static int q = World::createQuery(mask);
 
-    float leadX = 0.f;
+    float leadX = 0.f, leadY = 0.f;
     bool  found = false;
 
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
         if (e.get<PlayerStateComponent>().is_eliminated) continue;
-        const float px = e.get<TransformComponent>().position.x;
-        if (!found || px > leadX) { leadX = px; found = true; }
+        const auto& pos = e.get<TransformComponent>().position;
+        if (!found || pos.x > leadX) { leadX = pos.x; leadY = pos.y; found = true; }
     }
 
     if (found && ctx.camera.has<TransformComponent>()) {
         const float visibleW = static_cast<float>(SCREEN_W) / ctx.zoom;
-        float camX = leadX - visibleW / 2.f;
-        if (camX < 0.f)                      camX = 0.f;
-        if (camX > ctx.mapWidthPx - visibleW) camX = ctx.mapWidthPx - visibleW;
+        const float visibleH = static_cast<float>(SCREEN_H) / ctx.zoom;
+        float camX = leadX - visibleW * 0.5f;
+        float camY = leadY - visibleH * 0.6f; // player in upper-third of view
+        if (camX < 0.f)                       camX = 0.f;
+        if (camX > ctx.mapWidthPx  - visibleW) camX = ctx.mapWidthPx  - visibleW;
+        if (camY < 0.f)                       camY = 0.f;
+        if (camY > ctx.mapHeightPx - visibleH) camY = ctx.mapHeightPx - visibleH;
         auto& cam = ctx.camera.get<TransformComponent>();
         cam.position.x = camX;
-        cam.position.y = ctx.mapCameraY;
+        cam.position.y = camY;
     }
 }
 
@@ -390,6 +493,46 @@ void renderTileMap(const SystemContext& ctx, SDL_FPoint camPos, float z)
             };
 
             const SDL_FRect* src = &fullSrc;
+            if (cell == TileCell::Cloud) {
+                // Draw a fluffy cloud shape using overlapping white rects
+                SDL_SetRenderDrawBlendMode(ctx.renderer, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(ctx.renderer, 240, 245, 255, 200);
+                SDL_FRect base  = { dest.x,              dest.y + dest.h * 0.42f, dest.w,        dest.h * 0.58f };
+                SDL_FRect bump1 = { dest.x + dest.w*0.1f, dest.y + dest.h * 0.1f, dest.w * 0.55f, dest.h * 0.65f };
+                SDL_FRect bump2 = { dest.x + dest.w*0.5f, dest.y + dest.h * 0.2f, dest.w * 0.4f,  dest.h * 0.5f  };
+                SDL_RenderFillRect(ctx.renderer, &base);
+                SDL_RenderFillRect(ctx.renderer, &bump1);
+                SDL_RenderFillRect(ctx.renderer, &bump2);
+                SDL_SetRenderDrawBlendMode(ctx.renderer, SDL_BLENDMODE_NONE);
+                continue;
+            }
+
+            if (cell == TileCell::QuestionBlock) {
+                // Apply bounce offset if this tile is mid-animation
+                if (ctx.bouncingQBlocks) {
+                    const uint32_t key = static_cast<uint32_t>(col)
+                                       | (static_cast<uint32_t>(row) << 16);
+                    auto bit = ctx.bouncingQBlocks->find(key);
+                    if (bit != ctx.bouncingQBlocks->end()) {
+                        constexpr float BOUNCE_DURATION = 0.22f;
+                        constexpr float BOUNCE_HEIGHT   = 10.f;
+                        const float t = bit->second / BOUNCE_DURATION; // 0→1
+                        const float offsetY = -BOUNCE_HEIGHT * std::sin(t * 3.14159f) * z;
+                        dest.y += offsetY;
+                    }
+                }
+                if (ctx.questionTile) {
+                    SDL_RenderTexture(ctx.renderer, ctx.questionTile, nullptr, &dest);
+                } else {
+                    SDL_SetRenderDrawColor(ctx.renderer, 255, 200, 30, 255);
+                    SDL_RenderFillRect(ctx.renderer, &dest);
+                }
+                continue;
+            }
+
+            if (cell == TileCell::Coin)
+                continue; // coin entities are spawned separately
+
             if (cell == TileCell::Dirt)
                 src = &dirtSrc;
 

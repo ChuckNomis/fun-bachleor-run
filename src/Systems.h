@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <box2d/box2d.h>
+#include <unordered_map>
 #include "bagel.h"
 #include "TileMap.h"
 
@@ -19,16 +20,21 @@ struct SystemContext {
     float         mapHeightPx;
     float         mapCameraY;
     float         zoom;
-    const TileMap* tileMap    = nullptr;
-    SDL_Texture*  terrainTile = nullptr;
+    TileMap*       tileMap      = nullptr;
+    SDL_Texture*  terrainTile   = nullptr;
+    SDL_Texture*  questionTile  = nullptr;
+    std::unordered_map<uint32_t, bagel::Entity>* qBlockBodies   = nullptr;
+    // key = col|(row<<16), value = elapsed seconds into bounce animation
+    std::unordered_map<uint32_t, float>*         bouncingQBlocks = nullptr;
 };
 
 // Systems run once per frame, in this order (see Game::run):
-//   input -> controller -> physics -> sensor -> damage -> camera -> render
+//   input -> controller -> physics -> sensor -> damage -> qblock -> camera -> render
 void input_system(const SDL_Event* events, int eventCount);
 void controller_system(const SystemContext& ctx);
 void physics_system(const SystemContext& ctx);
 void sensor_system(const SystemContext& ctx);
 void damage_system(const SystemContext& ctx);
+void qblock_system(const SystemContext& ctx);
 void camera_system(const SystemContext& ctx);
 void render_system(const SystemContext& ctx);
