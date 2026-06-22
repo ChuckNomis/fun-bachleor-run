@@ -13,7 +13,6 @@ struct SystemContext {
     SDL_Renderer* renderer;
     SDL_Window*   window;
     SDL_Texture*  spritesheet;
-    bagel::Entity camera;
     float         frameDtSec;
     SDL_Texture*  mapTexture;
     float         mapWidthPx;

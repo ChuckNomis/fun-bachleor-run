@@ -253,13 +253,21 @@ Game::~Game()
 
 void Game::init_world()
 {
-    _camera = createCamera({ 0.f, _mapCameraY });
+    SDL_Rect vp1 = { 0, 0, SCREEN_W, SCREEN_H / 2 - 2 };
+    createCamera({ 0.f, _mapCameraY }, 0, vp1);
+
+    SDL_Rect vp2 = { 0, SCREEN_H / 2 + 2, SCREEN_W, SCREEN_H / 2 - 2 };
+    createCamera({ 0.f, _mapCameraY }, 1, vp2);
 
     createSensorArea(_physicsWorld, nullptr,
                      _finishSensor, 256.f, 140.f,
                      SensorType::FinishLine);
 
     createPlayer(_physicsWorld, _spritesheet, _playerStart, 0);
+
+    SDL_FPoint p2Start = _playerStart;
+    p2Start.x -= 40.f; // start slightly behind
+    createPlayer(_physicsWorld, _spritesheet, p2Start, 1);
 }
 
 bool Game::any_player_finished() const
@@ -300,8 +308,9 @@ void Game::reset_race()
         e.get<TransformComponent>().position = _playerStart;
     }
 
-    if (_camera.has<TransformComponent>())
-        _camera.get<TransformComponent>().position = { 0.f, _mapCameraY };
+    if (false) {
+        // Obsolete: _camera logic removed
+    }
 
     destroyAllCoins();
     spawnCoins(_physicsWorld, _coinTex, _coinSpawns);
@@ -316,7 +325,6 @@ void Game::run()
         _renderer,
         _window,
         _spritesheet,
-        _camera,
         1.f / TARGET_FPS,
         nullptr,
         _levelWidthPx,

@@ -45,19 +45,25 @@ namespace {
         return false;
     }
 
-    bool isPlayerGrounded(b2WorldId world, b2BodyId body, b2ShapeId ownShape)
+    bool isPlayerGrounded(b2WorldId world, b2BodyId body, b2ShapeId ownShape, bool is_inverted)
     {
         const b2Transform t = b2Body_GetTransform(body);
         const float hh    = PLAYER_BODY_HH / BOX_SCALE;
         const float halfW = 8.f / BOX_SCALE;
         const float probe = GROUND_PROBE_PX / BOX_SCALE;
-        const float feetY = t.p.y + hh;
 
         // Overlap a thin region under the feet. Unlike ray casts, this works
         // when the player is resting on a surface (initial overlap).
         b2AABB aabb;
-        aabb.lowerBound = { t.p.x - halfW, feetY - 2.f / BOX_SCALE };
-        aabb.upperBound = { t.p.x + halfW, feetY + probe };
+        if (!is_inverted) {
+            const float feetY = t.p.y + hh;
+            aabb.lowerBound = { t.p.x - halfW, feetY - 2.f / BOX_SCALE };
+            aabb.upperBound = { t.p.x + halfW, feetY + probe };
+        } else {
+            const float headY = t.p.y - hh;
+            aabb.lowerBound = { t.p.x - halfW, headY - probe };
+            aabb.upperBound = { t.p.x + halfW, headY + 2.f / BOX_SCALE };
+        }
 
         GroundProbeContext ctx{ ownShape, false };
         b2World_OverlapAABB(world, aabb, b2DefaultQueryFilter(), groundOverlapCallback, &ctx);
@@ -84,7 +90,9 @@ namespace {
                 continue;
             }
 
-            if (n.y > 0.3f)
+            if (!is_inverted && n.y > 0.3f)
+                return true;
+            if (is_inverted && n.y < -0.3f)
                 return true;
         }
 
@@ -125,17 +133,14 @@ namespace {
 
 // ──────────────────────────────────────────────────────────────
 namespace {
-    bool isJumpKeyDown(const SDL_Event& ev)
+    bool isJumpKeyDown(const SDL_Event& ev, int playerIndex)
     {
         if (ev.type != SDL_EVENT_KEY_DOWN || ev.key.repeat != 0)
             return false;
-        switch (ev.key.scancode) {
-        case SDL_SCANCODE_SPACE:
-        case SDL_SCANCODE_W:
-        case SDL_SCANCODE_UP:
-            return true;
-        default:
-            return false;
+        if (playerIndex == 0) {
+            return ev.key.scancode == SDL_SCANCODE_UP;
+        } else {
+            return ev.key.scancode == SDL_SCANCODE_W;
         }
     }
 }
@@ -146,10 +151,16 @@ void input_system(const SDL_Event* events, int eventCount)
     static int q = World::createQuery(mask);
 
     const bool* keys = SDL_GetKeyboardState(nullptr);
-    const bool  spaceHeld = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
-    static bool wasJumpHeld = false;
-    const bool  jumpEdge    = spaceHeld && !wasJumpHeld;
-    wasJumpHeld = spaceHeld;
+    const bool  p1JumpHeld = keys[SDL_SCANCODE_UP];
+    const bool  p2JumpHeld = keys[SDL_SCANCODE_W];
+
+    static bool wasP1JumpHeld = false;
+    const bool  p1JumpEdge    = p1JumpHeld && !wasP1JumpHeld;
+    wasP1JumpHeld = p1JumpHeld;
+
+    static bool wasP2JumpHeld = false;
+    const bool  p2JumpEdge    = p2JumpHeld && !wasP2JumpHeld;
+    wasP2JumpHeld = p2JumpHeld;
 
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
         auto& in = e.get<PlayerInputComponent>();
@@ -162,20 +173,22 @@ void input_system(const SDL_Event* events, int eventCount)
             --in.jump_buffer_frames;
     }
 
-    auto queueJump = [&]() {
+    auto queueJump = [&](int playerIndex) {
         for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
             auto& in = e.get<PlayerInputComponent>();
-            in.jump_pressed = true;
-            in.jump_buffer_frames = JUMP_BUFFER_FRAMES;
+            if (in.player_index == playerIndex) {
+                in.jump_pressed = true;
+                in.jump_buffer_frames = JUMP_BUFFER_FRAMES;
+            }
         }
     };
 
-    if (jumpEdge)
-        queueJump();
+    if (p1JumpEdge) queueJump(0);
+    if (p2JumpEdge) queueJump(1);
 
     for (int i = 0; i < eventCount; ++i) {
-        if (isJumpKeyDown(events[i]))
-            queueJump();
+        if (isJumpKeyDown(events[i], 0)) queueJump(0);
+        if (isJumpKeyDown(events[i], 1)) queueJump(1);
     }
 }
 
@@ -186,6 +199,7 @@ void controller_system(const SystemContext& ctx)
         .set<PlayerInputComponent>()
         .set<PlayerStateComponent>()
         .set<PhysicsBodyComponent>()
+        .set<GravityShiftComponent>()
         .build();
     static int q = World::createQuery(mask);
 
@@ -193,6 +207,7 @@ void controller_system(const SystemContext& ctx)
         auto& in    = e.get<PlayerInputComponent>();
         auto& phys  = e.get<PhysicsBodyComponent>();
         auto& state = e.get<PlayerStateComponent>();
+        auto& grav  = e.get<GravityShiftComponent>();
 
         if (state.has_finished) {
             b2Body_SetLinearVelocity(phys.body_id, { 0.f, 0.f });
@@ -235,7 +250,7 @@ void controller_system(const SystemContext& ctx)
                             && phys.jump_lock_frames == 0;
 
         if (canJump) {
-            vel.y = -JUMP_VY;
+            vel.y = grav.is_inverted ? JUMP_VY : -JUMP_VY;
             phys.is_grounded      = false;
             phys.coyote_frames    = 0;
             phys.jump_lock_frames = JUMP_LOCK_FRAMES;
@@ -265,7 +280,20 @@ void physics_system(const SystemContext& ctx)
             b2Rot_GetAngle(t.q) * RAD_TO_DEG
         };
 
-        phys.is_grounded = isPlayerGrounded(ctx.physicsWorld, phys.body_id, phys.shape_id);
+        bool is_inverted = false;
+        if (e.has<GravityShiftComponent>()) {
+            auto& grav = e.get<GravityShiftComponent>();
+            if (grav.cooldown_timer_ms > 0.f) {
+                grav.cooldown_timer_ms -= ctx.frameDtSec * 1000.f;
+                if (grav.cooldown_timer_ms <= 0.f) {
+                    grav.cooldown_timer_ms = 0.f;
+                    grav.is_inverted = false;
+                    b2Body_SetGravityScale(phys.body_id, 1.0f);
+                }
+            }
+            is_inverted = grav.is_inverted;
+        }
+        phys.is_grounded = isPlayerGrounded(ctx.physicsWorld, phys.body_id, phys.shape_id, is_inverted);
 
         if (phys.is_grounded)
             phys.coyote_frames = COYOTE_FRAMES;
@@ -353,6 +381,7 @@ void qblock_system(const SystemContext& ctx)
         .set<TransformComponent>()
         .set<PhysicsBodyComponent>()
         .set<PlayerStateComponent>()
+        .set<GravityShiftComponent>()
         .build();
     static int q = World::createQuery(mask);
 
@@ -378,12 +407,16 @@ void qblock_system(const SystemContext& ctx)
     // ── Detect new hits ──
     for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
         const auto& phys = e.get<PhysicsBodyComponent>();
+        auto& grav = e.get<GravityShiftComponent>();
         const b2Vec2 vel = b2Body_GetLinearVelocity(phys.body_id);
-        if (vel.y >= 0.f)
+        
+        if (!grav.is_inverted && vel.y >= 0.f)
+            continue;
+        if (grav.is_inverted && vel.y <= 0.f)
             continue;
 
         const auto& pos    = e.get<TransformComponent>().position;
-        const float probeY = pos.y - PLAYER_BODY_HH - 6.f;
+        const float probeY = grav.is_inverted ? pos.y + PLAYER_BODY_HH + 6.f : pos.y - PLAYER_BODY_HH - 6.f;
         const int   tileRow = static_cast<int>(std::floor(probeY / ts));
         const int   colL    = static_cast<int>(std::floor((pos.x - 14.f) / ts));
         const int   colR    = static_cast<int>(std::floor((pos.x + 14.f) / ts));
@@ -408,6 +441,11 @@ void qblock_system(const SystemContext& ctx)
 
             // Start bounce — tile stays visible during animation
             ctx.bouncingQBlocks->emplace(key, 0.f);
+
+            // Activate gravity shift for this player
+            grav.is_inverted = true;
+            grav.cooldown_timer_ms = 3000.f; // 3 seconds
+            b2Body_SetGravityScale(phys.body_id, -1.0f);
         }
     }
 }
@@ -415,33 +453,45 @@ void qblock_system(const SystemContext& ctx)
 // ──────────────────────────────────────────────────────────────
 void camera_system(const SystemContext& ctx)
 {
-    static const Mask mask = MaskBuilder()
+    static const Mask camMask = MaskBuilder().set<TransformComponent>().set<CameraComponent>().build();
+    static int camQ = World::createQuery(camMask);
+
+    static const Mask playerMask = MaskBuilder()
         .set<TransformComponent>()
         .set<PlayerStateComponent>()
+        .set<PlayerInputComponent>()
         .build();
-    static int q = World::createQuery(mask);
+    static int playerQ = World::createQuery(playerMask);
 
-    float leadX = 0.f, leadY = 0.f;
-    bool  found = false;
+    for (Entity cam = World::first(camQ); !World::eof(camQ); cam = World::next(camQ)) {
+        auto& camComp = cam.get<CameraComponent>();
+        auto& camTr   = cam.get<TransformComponent>();
 
-    for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
-        if (e.get<PlayerStateComponent>().is_eliminated) continue;
-        const auto& pos = e.get<TransformComponent>().position;
-        if (!found || pos.x > leadX) { leadX = pos.x; leadY = pos.y; found = true; }
-    }
+        bool found = false;
+        SDL_FPoint pPos{0, 0};
 
-    if (found && ctx.camera.has<TransformComponent>()) {
-        const float visibleW = static_cast<float>(SCREEN_W) / ctx.zoom;
-        const float visibleH = static_cast<float>(SCREEN_H) / ctx.zoom;
-        float camX = leadX - visibleW * 0.5f;
-        float camY = leadY - visibleH * 0.6f; // player in upper-third of view
-        if (camX < 0.f)                       camX = 0.f;
-        if (camX > ctx.mapWidthPx  - visibleW) camX = ctx.mapWidthPx  - visibleW;
-        if (camY < 0.f)                       camY = 0.f;
-        if (camY > ctx.mapHeightPx - visibleH) camY = ctx.mapHeightPx - visibleH;
-        auto& cam = ctx.camera.get<TransformComponent>();
-        cam.position.x = camX;
-        cam.position.y = camY;
+        for (Entity p = World::first(playerQ); !World::eof(playerQ); p = World::next(playerQ)) {
+            if (p.get<PlayerStateComponent>().is_eliminated) continue;
+            if (p.get<PlayerInputComponent>().player_index == camComp.target_player_index) {
+                pPos = p.get<TransformComponent>().position;
+                found = true;
+                break;
+            }
+        }
+
+        if (found) {
+            const float visibleW = static_cast<float>(camComp.viewport_rect.w) / ctx.zoom;
+            const float visibleH = static_cast<float>(camComp.viewport_rect.h) / ctx.zoom;
+            float camX = pPos.x - visibleW * 0.5f;
+            float camY = pPos.y - visibleH * 0.6f; // player in upper-third of view
+            if (camX < 0.f)                       camX = 0.f;
+            if (camX > ctx.mapWidthPx  - visibleW) camX = ctx.mapWidthPx  - visibleW;
+            if (camY < 0.f)                       camY = 0.f;
+            if (camY > ctx.mapHeightPx - visibleH) camY = ctx.mapHeightPx - visibleH;
+            
+            camTr.position.x = camX;
+            camTr.position.y = camY;
+        }
     }
 }
 
@@ -557,98 +607,130 @@ void renderTileMap(const SystemContext& ctx, SDL_FPoint camPos, float z)
 // ──────────────────────────────────────────────────────────────
 void render_system(const SystemContext& ctx)
 {
-    static const Mask mask = MaskBuilder()
+    static const Mask drawMask = MaskBuilder()
         .set<TransformComponent>()
         .set<DrawableComponent>()
         .build();
-    static int q = World::createQuery(mask);
+    static int drawQ = World::createQuery(drawMask);
 
-    SDL_FPoint camPos{0.f, 0.f};
-    if (ctx.camera.has<TransformComponent>())
-        camPos = ctx.camera.get<TransformComponent>().position;
+    static const Mask camMask = MaskBuilder()
+        .set<TransformComponent>()
+        .set<CameraComponent>()
+        .build();
+    static int camQ = World::createQuery(camMask);
 
     const float z = ctx.zoom;
 
-    if (ctx.mapTexture) {
-        SDL_SetRenderDrawColor(ctx.renderer, 100, 180, 240, 255);
-        SDL_RenderClear(ctx.renderer);
-        SDL_FRect mapDest = {
-            -camPos.x * z,
-            -camPos.y * z,
-            ctx.mapWidthPx * z,
-            ctx.mapHeightPx * z
-        };
-        SDL_RenderTexture(ctx.renderer, ctx.mapTexture, nullptr, &mapDest);
-    } else {
-        SDL_SetRenderDrawColor(ctx.renderer, 100, 180, 240, 255);
-        SDL_RenderClear(ctx.renderer);
+    // Advance animations once per frame
+    static const Mask animMask = MaskBuilder().set<AnimationComponent>().build();
+    static int animQ = World::createQuery(animMask);
+    for (Entity e = World::first(animQ); !World::eof(animQ); e = World::next(animQ)) {
+        auto& anim = e.get<AnimationComponent>();
+        anim.timer_ms += ctx.frameDtSec * 1000.f;
+        if (anim.timer_ms >= anim.frame_duration_ms) {
+            anim.timer_ms -= anim.frame_duration_ms;
+            anim.frame_index = (anim.frame_index + 1) % SPRITE_RUN_FRAMES;
+        }
     }
 
-    renderTileMap(ctx, camPos, z);
+    // Clear whole screen with black (for divider)
+    SDL_SetRenderViewport(ctx.renderer, nullptr);
+    SDL_SetRenderDrawColor(ctx.renderer, 0, 0, 0, 255);
+    SDL_RenderClear(ctx.renderer);
 
-    for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
-        const auto& tr = e.get<TransformComponent>();
-        auto&       dr = e.get<DrawableComponent>();
+    for (Entity cam = World::first(camQ); !World::eof(camQ); cam = World::next(camQ)) {
+        auto& camComp = cam.get<CameraComponent>();
+        SDL_FPoint camPos = cam.get<TransformComponent>().position;
 
-        // Compute source rect (animated entities use the per-frame rect)
-        SDL_FRect src = dr.src_rect;
-        if (e.has<AnimationComponent>()) {
-            auto& anim = e.get<AnimationComponent>();
-            anim.timer_ms += ctx.frameDtSec * 1000.f;
-            if (anim.timer_ms >= anim.frame_duration_ms) {
-                anim.timer_ms -= anim.frame_duration_ms;
-                anim.frame_index = (anim.frame_index + 1) % SPRITE_RUN_FRAMES;
-            }
-            const int col = anim.frame_index % SPRITE_COLS;
-            src = {
-                col * SPRITE_FRAME_W + SPRITE_CROP_X,
-                SPRITE_CROP_Y,
-                SPRITE_CROP_W,
-                SPRITE_CROP_H
+        SDL_SetRenderViewport(ctx.renderer, &camComp.viewport_rect);
+
+        // Fill viewport background
+        SDL_SetRenderDrawColor(ctx.renderer, 100, 180, 240, 255);
+        SDL_FRect bgRect = {0.f, 0.f, static_cast<float>(camComp.viewport_rect.w), static_cast<float>(camComp.viewport_rect.h)};
+        SDL_RenderFillRect(ctx.renderer, &bgRect);
+
+        if (ctx.mapTexture) {
+            SDL_FRect mapDest = {
+                -camPos.x * z,
+                -camPos.y * z,
+                ctx.mapWidthPx * z,
+                ctx.mapHeightPx * z
             };
+            SDL_RenderTexture(ctx.renderer, ctx.mapTexture, nullptr, &mapDest);
         }
 
-        // World-space top-left of the draw rect
-        const float baseW = dr.dest_dimensions.w;
-        const float baseH = dr.dest_dimensions.h;
+        renderTileMap(ctx, camPos, z);
 
-        const float worldLeft = tr.position.x - baseW / 2.f;
-        const float worldTop  = e.has<AnimationComponent>()
-            ? (tr.position.y + PLAYER_BODY_HH - baseH) // bottom-align to physics body
-            : (tr.position.y - baseH / 2.f);            // center-align
+        for (Entity e = World::first(drawQ); !World::eof(drawQ); e = World::next(drawQ)) {
+            const auto& tr = e.get<TransformComponent>();
+            auto&       dr = e.get<DrawableComponent>();
 
-        SDL_FRect dest {
-            (worldLeft - camPos.x) * z,
-            (worldTop  - camPos.y) * z,
-            baseW * z,
-            baseH * z
-        };
+            SDL_FRect src = dr.src_rect;
+            if (e.has<AnimationComponent>()) {
+                const auto& anim = e.get<AnimationComponent>();
+                const int col = anim.frame_index % SPRITE_COLS;
+                src = {
+                    col * SPRITE_FRAME_W + SPRITE_CROP_X,
+                    SPRITE_CROP_Y,
+                    SPRITE_CROP_W,
+                    SPRITE_CROP_H
+                };
+            }
 
-        if (dr.texture) {
-            SDL_FRect* srcPtr = e.has<AnimationComponent>() ? &src : nullptr;
-            SDL_RenderTextureRotated(
-                ctx.renderer, dr.texture, srcPtr, &dest,
-                tr.rotation_degrees, nullptr,
-                static_cast<SDL_FlipMode>(dr.flip_flags));
+            const float baseW = dr.dest_dimensions.w;
+            const float baseH = dr.dest_dimensions.h;
+
+            bool is_inverted = e.has<GravityShiftComponent>() && e.get<GravityShiftComponent>().is_inverted;
+            const float worldLeft = tr.position.x - baseW / 2.f;
+            const float worldTop  = e.has<AnimationComponent>()
+                ? (is_inverted ? (tr.position.y - PLAYER_BODY_HH) : (tr.position.y + PLAYER_BODY_HH - baseH)) // align
+                : (tr.position.y - baseH / 2.f);            // center-align
+
+            SDL_FRect dest {
+                (worldLeft - camPos.x) * z,
+                (worldTop  - camPos.y) * z,
+                baseW * z,
+                baseH * z
+            };
+
+            if (dr.texture) {
+                SDL_FRect* srcPtr = e.has<AnimationComponent>() ? &src : nullptr;
+                int flip = dr.flip_flags;
+                if (is_inverted) {
+                    flip |= SDL_FLIP_VERTICAL;
+                }
+                SDL_SetTextureColorMod(dr.texture, dr.color_mod.r, dr.color_mod.g, dr.color_mod.b);
+                SDL_SetTextureAlphaMod(dr.texture, dr.color_mod.a);
+
+                SDL_RenderTextureRotated(
+                    ctx.renderer, dr.texture, srcPtr, &dest,
+                    tr.rotation_degrees, nullptr,
+                    static_cast<SDL_FlipMode>(flip));
+
+                SDL_SetTextureColorMod(dr.texture, 255, 255, 255);
+                SDL_SetTextureAlphaMod(dr.texture, 255);
+            }
         }
-    }
-
-    // Score HUD (top-left).
-    {
-        static const Mask playerMask = MaskBuilder().set<PlayerStateComponent>().build();
+        
+        // Draw local HUD (Score)
+        static const Mask playerMask = MaskBuilder().set<PlayerStateComponent>().set<PlayerInputComponent>().build();
         static int playerQ = World::createQuery(playerMask);
-
         for (Entity e = World::first(playerQ); !World::eof(playerQ); e = World::next(playerQ)) {
-            const int score = e.get<PlayerStateComponent>().score;
-            char      buf[32];
-            std::snprintf(buf, sizeof(buf), "Score: %d", score);
-            SDL_SetRenderDrawColor(ctx.renderer, 255, 255, 255, 255);
-            SDL_RenderDebugText(ctx.renderer, 16.f, 12.f, buf);
-            break;
+            if (e.get<PlayerInputComponent>().player_index == camComp.target_player_index) {
+                const int score = e.get<PlayerStateComponent>().score;
+                char      buf[32];
+                std::snprintf(buf, sizeof(buf), "Player %d Score: %d", camComp.target_player_index + 1, score);
+                SDL_SetRenderDrawColor(ctx.renderer, 255, 255, 255, 255);
+                SDL_RenderDebugText(ctx.renderer, 16.f, 12.f, buf);
+                break;
+            }
         }
     }
 
-    // Win overlay when any player has crossed the finish line.
+    // Reset viewport for global overlay
+    SDL_SetRenderViewport(ctx.renderer, nullptr);
+
+    // Win overlay
     {
         static const Mask playerMask = MaskBuilder().set<PlayerStateComponent>().build();
         static int playerQ = World::createQuery(playerMask);
@@ -671,13 +753,17 @@ void render_system(const SystemContext& ctx)
             SDL_SetRenderDrawColor(ctx.renderer, 255, 255, 255, 255);
             SDL_RenderDebugText(ctx.renderer, 520.f, 320.f, "YOU WIN!");
             SDL_RenderDebugText(ctx.renderer, 460.f, 360.f, "Press R to restart");
-
+            
+            float yPos = 400.f;
             for (Entity e = World::first(playerQ); !World::eof(playerQ); e = World::next(playerQ)) {
-                const int score = e.get<PlayerStateComponent>().score;
-                char      buf[48];
-                std::snprintf(buf, sizeof(buf), "Final score: %d", score);
-                SDL_RenderDebugText(ctx.renderer, 480.f, 400.f, buf);
-                break;
+                if (e.has<PlayerInputComponent>()) {
+                    int pIdx = e.get<PlayerInputComponent>().player_index;
+                    const int score = e.get<PlayerStateComponent>().score;
+                    char      buf[64];
+                    std::snprintf(buf, sizeof(buf), "Player %d Final score: %d", pIdx + 1, score);
+                    SDL_RenderDebugText(ctx.renderer, 480.f, yPos, buf);
+                    yPos += 40.f;
+                }
             }
         }
     }

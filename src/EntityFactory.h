@@ -65,4 +65,4 @@ bagel::Entity createCoin(
     SDL_FPoint   centerPx,
     int          value = COIN_SCORE_VALUE);
 
-bagel::Entity createCamera(SDL_FPoint startPosPx);
+bagel::Entity createCamera(SDL_FPoint startPosPx, int targetPlayerIndex, SDL_Rect viewport);

@@ -49,5 +49,4 @@ private:
     b2WorldId     _physicsWorld{};
     bool          _running     = false;
 
-    bagel::Entity _camera{{-1}};
 };

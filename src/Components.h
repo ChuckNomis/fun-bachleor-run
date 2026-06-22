@@ -23,6 +23,7 @@ struct DrawableComponent {
     SDL_FRect    src_rect;
     SDL_FRect    dest_dimensions;
     int          flip_flags;
+    SDL_Color    color_mod = {255, 255, 255, 255};
 };
 
 struct PhysicsBodyComponent {
@@ -34,6 +35,7 @@ struct PhysicsBodyComponent {
 };
 
 struct PlayerInputComponent {
+    int  player_index;
     bool move_right;
     bool move_left;
     bool jump_pressed;
@@ -86,6 +88,11 @@ struct AnimationComponent {
     float frame_duration_ms;
 };
 
+struct CameraComponent {
+    int      target_player_index;
+    SDL_Rect viewport_rect;
+};
+
 // ─────────────────────────────────────────────
 // Storage overrides — must be visible before first use.
 // PackedStorage is for components iterated every frame by hot systems.
@@ -105,4 +112,7 @@ template <> struct bagel::Storage<PhysicsBodyComponent> final : bagel::NoInstanc
 };
 template <> struct bagel::Storage<AnimationComponent> final : bagel::NoInstance {
     using type = bagel::PackedStorage<AnimationComponent>;
+};
+template <> struct bagel::Storage<CameraComponent> final : bagel::NoInstance {
+    using type = bagel::PackedStorage<CameraComponent>;
 };

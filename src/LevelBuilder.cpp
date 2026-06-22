@@ -262,6 +262,9 @@ BuiltLevel buildTileLevel(b2WorldId world, TileMap& tileMap,
     level.heightPx = static_cast<float>(kRowCount) * static_cast<float>(TILE_SIZE);
     level.cameraY  = 0.f;
 
+    // Invisible ceiling across the entire level to allow running on the top of the screen
+    createPhysicsPlatform(world, { level.widthPx * 0.5f, -10.f }, level.widthPx, 20.f);
+
     for (int row = 0; row < tileMap.rows; ++row)
         addMergedRowPhysics(world, row, tileMap);
 

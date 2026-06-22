@@ -10,7 +10,7 @@ static constexpr float PLAYER_DRAW_W  = 96.f;
 static constexpr float PLAYER_DRAW_H  = 96.f;
 
 bagel::Entity createPlayer(b2WorldId world, SDL_Texture* tex,
-                           SDL_FPoint startPosPx, int /*playerIndex*/)
+                           SDL_FPoint startPosPx, int playerIndex)
 {
     b2BodyDef bodyDef       = b2DefaultBodyDef();
     bodyDef.type            = b2_dynamicBody;
@@ -40,11 +40,14 @@ bagel::Entity createPlayer(b2WorldId world, SDL_Texture* tex,
                               { 0, 0, PLAYER_DRAW_W, PLAYER_DRAW_H },
                               SDL_FLIP_NONE },
         PhysicsBodyComponent{ body, shape, false, 0, 0 },
-        PlayerInputComponent{ false, false, false, false, false, 0 },
+        PlayerInputComponent{ playerIndex, false, false, false, false, false, 0 },
         PlayerStateComponent{ 3, 1.0f, -1, false, false, 0 },
         GravityShiftComponent{ false, 0.f, 3000.f },
         AnimationComponent  { 0, 0.f, 80.f }
     );
+    if (playerIndex == 1) {
+        e.get<DrawableComponent>().color_mod = {150, 150, 255, 255}; // Blue tint
+    }
     return e;
 }
 
@@ -172,9 +175,12 @@ bagel::Entity createCoin(b2WorldId world, SDL_Texture* tex,
     return e;
 }
 
-bagel::Entity createCamera(SDL_FPoint startPosPx)
+bagel::Entity createCamera(SDL_FPoint startPosPx, int targetPlayerIndex, SDL_Rect viewport)
 {
     Entity e = Entity::create();
-    e.add(TransformComponent{ startPosPx, 0.f });
+    e.addAll(
+        TransformComponent{ startPosPx, 0.f },
+        CameraComponent{ targetPlayerIndex, viewport }
+    );
     return e;
 }
