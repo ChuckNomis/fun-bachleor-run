@@ -605,6 +605,25 @@ void renderTileMap(const SystemContext& ctx, SDL_FPoint camPos, float z)
 } // namespace
 
 // ──────────────────────────────────────────────────────────────
+void audio_system(const SystemContext& ctx)
+{
+    static const Mask mask = MaskBuilder().set<BgmComponent>().build();
+    static int q = World::createQuery(mask);
+
+    for (Entity e = World::first(q); !World::eof(q); e = World::next(q)) {
+        auto& bgm = e.get<BgmComponent>();
+        if (!bgm.is_playing || !bgm.stream || !bgm.audio_buf)
+            continue;
+
+        // Keep the stream fed if it runs low
+        int available = SDL_GetAudioStreamAvailable(bgm.stream);
+        if (available < static_cast<int>(bgm.audio_len)) {
+            SDL_PutAudioStreamData(bgm.stream, bgm.audio_buf, bgm.audio_len);
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
 void render_system(const SystemContext& ctx)
 {
     static const Mask drawMask = MaskBuilder()

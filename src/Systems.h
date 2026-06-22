@@ -37,3 +37,4 @@ void damage_system(const SystemContext& ctx);
 void qblock_system(const SystemContext& ctx);
 void camera_system(const SystemContext& ctx);
 void render_system(const SystemContext& ctx);
+void audio_system(const SystemContext& ctx);

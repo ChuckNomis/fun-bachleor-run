@@ -59,4 +59,8 @@ private:
     GameState     _state       = GameState::Menu;
     int           _menuSelection = 0; // 0 = Single, 1 = Co-op, 2 = Scores, 3 = Settings
     int           _numPlayers  = 1;
+
+    SDL_AudioStream* _bgmStream = nullptr;
+    Uint8*           _bgmBuf    = nullptr;
+    Uint32           _bgmLen    = 0;
 };

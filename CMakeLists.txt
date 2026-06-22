@@ -10,7 +10,7 @@ add_executable(funrun
     src/Systems.cpp
     lib/bagel26/bagel.h)
 
-target_include_directories(funrun PRIVATE src lib/bagel26 lib/SDL_image/include)
+target_include_directories(funrun PRIVATE src lib/bagel26 lib/SDL_image/include lib/minimp3)
 
 set(SDL_STATIC ON)
 add_subdirectory(lib/SDL)

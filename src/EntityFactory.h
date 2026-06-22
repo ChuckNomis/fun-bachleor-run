@@ -10,7 +10,7 @@
 // Fun Run ECS Architecture & Implementation Plan. Each factory creates
 // the entity, attaches its component set via addAll(...), and (where
 // applicable) creates the matching Box2D body. Pixel positions are
-// converted to Box2D meters internally via BOX_SCALE.
+// converted to Box2D meters internally via BOX_SCALE.m
 
 bagel::Entity createPlayer(
     b2WorldId    world,

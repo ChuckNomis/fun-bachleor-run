@@ -4,6 +4,9 @@
 #include "LevelBuilder.h"
 #include "Systems.h"
 #include "TileConfig.h"
+#define MINIMP3_IMPLEMENTATION
+#include "minimp3.h"
+#include "minimp3_ex.h"
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <cmath>
@@ -209,7 +212,7 @@ static SDL_Texture* makeSolidTex(SDL_Renderer* renderer, Uint8 r, Uint8 g, Uint8
 
 Game::Game()
 {
-    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     SDL_CreateWindowAndRenderer("Fun Run — Demo", SCREEN_W, SCREEN_H, 0, &_window, &_renderer);
 
     _spritesheet = loadPlayerSheet(_renderer, "res/spritesheet.png");
@@ -234,6 +237,31 @@ Game::Game()
     _playerStart           = level.playerStart;
     _finishSensor          = level.finishSensor;
 
+    mp3dec_t mp3d;
+    mp3dec_file_info_t info;
+    if (mp3dec_load(&mp3d, "res/music.mp3", &info, NULL, NULL) == 0) {
+        SDL_AudioSpec spec;
+        spec.format = SDL_AUDIO_S16LE;
+        spec.channels = info.channels;
+        spec.freq = info.hz;
+
+        _bgmLen = info.samples * sizeof(short);
+        _bgmBuf = (Uint8*)SDL_malloc(_bgmLen);
+        if (_bgmBuf) {
+            memcpy(_bgmBuf, info.buffer, _bgmLen);
+        }
+        free(info.buffer); // minimp3 allocates with malloc
+
+        if (_bgmBuf) {
+            _bgmStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+            if (_bgmStream) {
+                SDL_ResumeAudioStreamDevice(_bgmStream);
+                bagel::Entity bgmEntity = bagel::Entity::create();
+                bgmEntity.add<BgmComponent>(BgmComponent{ _bgmStream, _bgmBuf, _bgmLen, true });
+            }
+        }
+    }
+
     init_world();
     _running = true;
 }
@@ -250,6 +278,10 @@ Game::~Game()
     SDL_DestroyTexture(_menuTexture);
     SDL_DestroyRenderer(_renderer);
     SDL_DestroyWindow(_window);
+    
+    if (_bgmStream) SDL_DestroyAudioStream(_bgmStream);
+    if (_bgmBuf) SDL_free(_bgmBuf);
+    
     SDL_Quit();
 }
 
@@ -296,10 +328,6 @@ void Game::reset_race()
                             b2Rot_identity);
         b2Body_SetLinearVelocity(phys.body_id, { 0.f, 0.f });
         e.get<TransformComponent>().position = _playerStart;
-    }
-
-    if (false) {
-        // Obsolete: _camera logic removed
     }
 
     destroyAllCoins();
@@ -465,6 +493,8 @@ void Game::run()
             camera_system(ctx);
             render_system(ctx);
         }
+
+        audio_system(ctx);
 
         const Uint64 elapsed = SDL_GetTicks() - frameStart;
         if (elapsed < static_cast<Uint64>(GAME_FRAME_MS))

@@ -83,9 +83,16 @@ struct TrapComponent {
 };
 
 struct AnimationComponent {
-    int   frame_index;        // 0-7 (4 cols x 2 rows in spritesheet)
+    int   frame_index;
     float timer_ms;
     float frame_duration_ms;
+};
+
+struct BgmComponent {
+    SDL_AudioStream* stream;
+    Uint8*           audio_buf;
+    Uint32           audio_len;
+    bool             is_playing;
 };
 
 struct CameraComponent {
