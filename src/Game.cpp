@@ -218,6 +218,7 @@ Game::Game()
     _finishSign  = cropTile(_renderer, "res/tiles.png", TILE_SIGN_X, TILE_SIGN_Y);
     _coinTex      = loadCoinTexture(_renderer, "res/coin.png");
     _questionTile = cropTile(_renderer, "res/tiles.png", 1032, 1584, 256, 256);
+    _menuTexture  = IMG_LoadTexture(_renderer, "res/menu.png");
 
     b2WorldDef worldDef = b2DefaultWorldDef();
     worldDef.gravity    = { 0.f, 9.81f };
@@ -246,6 +247,7 @@ Game::~Game()
     SDL_DestroyTexture(_finishSign);
     SDL_DestroyTexture(_coinTex);
     SDL_DestroyTexture(_questionTile);
+    SDL_DestroyTexture(_menuTexture);
     SDL_DestroyRenderer(_renderer);
     SDL_DestroyWindow(_window);
     SDL_Quit();
@@ -253,21 +255,9 @@ Game::~Game()
 
 void Game::init_world()
 {
-    SDL_Rect vp1 = { 0, 0, SCREEN_W, SCREEN_H / 2 - 2 };
-    createCamera({ 0.f, _mapCameraY }, 0, vp1);
-
-    SDL_Rect vp2 = { 0, SCREEN_H / 2 + 2, SCREEN_W, SCREEN_H / 2 - 2 };
-    createCamera({ 0.f, _mapCameraY }, 1, vp2);
-
     createSensorArea(_physicsWorld, nullptr,
                      _finishSensor, 256.f, 140.f,
                      SensorType::FinishLine);
-
-    createPlayer(_physicsWorld, _spritesheet, _playerStart, 0);
-
-    SDL_FPoint p2Start = _playerStart;
-    p2Start.x -= 40.f; // start slightly behind
-    createPlayer(_physicsWorld, _spritesheet, p2Start, 1);
 }
 
 bool Game::any_player_finished() const
@@ -318,6 +308,99 @@ void Game::reset_race()
     SDL_SetWindowTitle(_window, "Fun Run — Demo");
 }
 
+void Game::process_menu_input(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_KEY_DOWN) {
+        if (e.key.scancode == SDL_SCANCODE_LEFT) {
+            _menuSelection--;
+            if (_menuSelection < 0) _menuSelection = 3;
+        } else if (e.key.scancode == SDL_SCANCODE_RIGHT) {
+            _menuSelection++;
+            if (_menuSelection > 3) _menuSelection = 0;
+        } else if (e.key.scancode == SDL_SCANCODE_RETURN || e.key.scancode == SDL_SCANCODE_KP_ENTER) {
+            if (_menuSelection == 0) {
+                _numPlayers = 1;
+            } else if (_menuSelection == 1) {
+                _numPlayers = 2;
+            }
+            if (_menuSelection <= 1) {
+                // Clear existing players/cameras if any
+                static const bagel::Mask pMask = bagel::MaskBuilder().set<PlayerStateComponent>().build();
+                static int pQ = bagel::World::createQuery(pMask);
+                std::vector<bagel::Entity> toDestroy;
+                for (bagel::Entity e = bagel::World::first(pQ); !bagel::World::eof(pQ); e = bagel::World::next(pQ)) {
+                    b2DestroyBody(e.get<PhysicsBodyComponent>().body_id);
+                    toDestroy.push_back(e);
+                }
+                static const bagel::Mask cMask = bagel::MaskBuilder().set<CameraComponent>().build();
+                static int cQ = bagel::World::createQuery(cMask);
+                for (bagel::Entity e = bagel::World::first(cQ); !bagel::World::eof(cQ); e = bagel::World::next(cQ)) {
+                    toDestroy.push_back(e);
+                }
+                for (bagel::Entity e : toDestroy) e.destroy();
+
+                if (_numPlayers == 1) {
+                    SDL_Rect vp1 = { 0, 0, SCREEN_W, SCREEN_H };
+                    createCamera({ 0.f, _mapCameraY }, 0, vp1);
+                    createPlayer(_physicsWorld, _spritesheet, _playerStart, 0);
+                } else {
+                    SDL_Rect vp1 = { 0, 0, SCREEN_W, SCREEN_H / 2 - 2 };
+                    createCamera({ 0.f, _mapCameraY }, 0, vp1);
+                    SDL_Rect vp2 = { 0, SCREEN_H / 2 + 2, SCREEN_W, SCREEN_H / 2 - 2 };
+                    createCamera({ 0.f, _mapCameraY }, 1, vp2);
+                    createPlayer(_physicsWorld, _spritesheet, _playerStart, 0);
+                    SDL_FPoint p2Start = _playerStart;
+                    p2Start.x -= 40.f;
+                    createPlayer(_physicsWorld, _spritesheet, p2Start, 1);
+                }
+
+                destroyAllCoins();
+                spawnCoins(_physicsWorld, _coinTex, _coinSpawns);
+
+                _state = GameState::Playing;
+            }
+        }
+    }
+}
+
+void Game::render_menu()
+{
+    SDL_SetRenderDrawColor(_renderer, 0, 0, 0, 255);
+    SDL_RenderClear(_renderer);
+
+    if (_menuTexture) {
+        SDL_FRect dst = { 0, 0, (float)SCREEN_W, (float)SCREEN_H };
+        SDL_RenderTexture(_renderer, _menuTexture, nullptr, &dst);
+    }
+
+    // Draw selection highlight over the approximate button areas based on the image
+    // Note: These coordinates are approximations for 1280x720 and might need tuning
+    SDL_FRect highlight = { 0, 0, 0, 0 };
+    if (_menuSelection == 0) { // Single Player
+        highlight = { 100.f, 430.f, 250.f, 200.f };
+    } else if (_menuSelection == 1) { // 2 Player Co-op
+        highlight = { 360.f, 430.f, 250.f, 200.f };
+    } else if (_menuSelection == 2) { // Highest Score
+        highlight = { 760.f, 430.f, 250.f, 200.f };
+    } else if (_menuSelection == 3) { // Settings/Credits
+        highlight = { 1020.f, 430.f, 180.f, 200.f };
+    }
+
+    SDL_SetRenderDrawBlendMode(_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(_renderer, 255, 255, 0, 100); // Yellow glow
+    SDL_RenderFillRect(_renderer, &highlight);
+    
+    SDL_SetRenderDrawColor(_renderer, 255, 255, 0, 255); // Solid yellow border
+    SDL_RenderRect(_renderer, &highlight);
+
+    SDL_RenderPresent(_renderer);
+}
+
+void Game::return_to_menu()
+{
+    _state = GameState::Menu;
+}
+
 void Game::run()
 {
     SystemContext ctx{
@@ -349,23 +432,39 @@ void Game::run()
             if (ev.type == SDL_EVENT_QUIT ||
                 (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_ESCAPE))
                 _running = false;
-            if (ev.type == SDL_EVENT_KEY_DOWN &&
-                ev.key.scancode == SDL_SCANCODE_R &&
-                ev.key.repeat == 0 &&
-                any_player_finished())
-                reset_race();
-            if (eventCount < 64)
-                events[eventCount++] = ev;
+
+            if (_state == GameState::Menu) {
+                process_menu_input(ev);
+            } else {
+                if (ev.type == SDL_EVENT_KEY_DOWN &&
+                    ev.key.scancode == SDL_SCANCODE_R &&
+                    ev.key.repeat == 0 &&
+                    any_player_finished())
+                    reset_race();
+
+                if (ev.type == SDL_EVENT_KEY_DOWN &&
+                    ev.key.scancode == SDL_SCANCODE_M &&
+                    ev.key.repeat == 0 &&
+                    any_player_finished())
+                    return_to_menu();
+
+                if (eventCount < 64)
+                    events[eventCount++] = ev;
+            }
         }
 
-        input_system(events, eventCount);
-        controller_system(ctx);
-        physics_system(ctx);
-        sensor_system(ctx);
-        damage_system(ctx);
-        qblock_system(ctx);
-        camera_system(ctx);
-        render_system(ctx);
+        if (_state == GameState::Menu) {
+            render_menu();
+        } else {
+            input_system(events, eventCount);
+            controller_system(ctx);
+            physics_system(ctx);
+            sensor_system(ctx);
+            damage_system(ctx);
+            qblock_system(ctx);
+            camera_system(ctx);
+            render_system(ctx);
+        }
 
         const Uint64 elapsed = SDL_GetTicks() - frameStart;
         if (elapsed < static_cast<Uint64>(GAME_FRAME_MS))

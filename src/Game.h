@@ -17,6 +17,8 @@ inline constexpr int   TARGET_FPS    = 60;
 inline constexpr int   GAME_FRAME_MS = 1000 / TARGET_FPS;
 inline constexpr float CAMERA_ZOOM   = 1.0f;    // render scale (>1 = zoomed in)
 
+enum class GameState { Menu, Playing };
+
 class Game {
 public:
     Game();
@@ -28,6 +30,9 @@ private:
     void init_world();
     void reset_race();
     bool any_player_finished() const;
+    void process_menu_input(const SDL_Event& e);
+    void render_menu();
+    void return_to_menu();
 
     SDL_Window*   _window      = nullptr;
     SDL_Renderer* _renderer    = nullptr;
@@ -37,6 +42,8 @@ private:
     SDL_Texture*  _finishSign   = nullptr;
     SDL_Texture*  _coinTex      = nullptr;
     SDL_Texture*  _questionTile = nullptr;
+    SDL_Texture*  _menuTexture  = nullptr;
+
     std::vector<SDL_FPoint>                _coinSpawns;
     std::unordered_map<uint32_t, bagel::Entity> _qBlockBodies;
     std::unordered_map<uint32_t, float>         _bouncingQBlocks;
@@ -49,4 +56,7 @@ private:
     b2WorldId     _physicsWorld{};
     bool          _running     = false;
 
+    GameState     _state       = GameState::Menu;
+    int           _menuSelection = 0; // 0 = Single, 1 = Co-op, 2 = Scores, 3 = Settings
+    int           _numPlayers  = 1;
 };

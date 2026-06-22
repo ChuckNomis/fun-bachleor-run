@@ -753,8 +753,9 @@ void render_system(const SystemContext& ctx)
             SDL_SetRenderDrawColor(ctx.renderer, 255, 255, 255, 255);
             SDL_RenderDebugText(ctx.renderer, 520.f, 320.f, "YOU WIN!");
             SDL_RenderDebugText(ctx.renderer, 460.f, 360.f, "Press R to restart");
+            SDL_RenderDebugText(ctx.renderer, 460.f, 380.f, "Press M for menu");
             
-            float yPos = 400.f;
+            float yPos = 420.f;
             for (Entity e = World::first(playerQ); !World::eof(playerQ); e = World::next(playerQ)) {
                 if (e.has<PlayerInputComponent>()) {
                     int pIdx = e.get<PlayerInputComponent>().player_index;
